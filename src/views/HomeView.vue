@@ -101,33 +101,7 @@
       </div>
     </div>
 
-    <!-- Bottom Navigation -->
-    <!-- Bottom Navigation -->
-<div class="bottom-nav">
-  <router-link to="/" class="nav-item">
-    <Bell class="nav-icon" />
-    <span class="nav-label">Home</span>
-  </router-link>
-
-  <button class="nav-item" @click="openMap">
-    <MapPin class="nav-icon" />
-    <span class="nav-label">Location</span>
-  </button>
-
-  <router-link to="/notifications" class="nav-item" @click="markAllAsRead">
-    <div class="nav-icon-container">
-      <Bell class="nav-icon" />
-      <div v-if="unreadCount > 0" class="notification-badge">{{ unreadCount }}</div>
-    </div>
-    <span class="nav-label">Notification</span>
-  </router-link>
-
-  <router-link to="/settings" class="nav-item">
-    <Settings class="nav-icon" />
-    <span class="nav-label">Settings</span>
-  </router-link>
-</div>
-  </div>
+      </div>
 </template>
 
 <script setup>
@@ -320,6 +294,14 @@ const smokePercentage = computed(() => {
   padding: 24px 20px;
   padding-bottom: 100px;
 }
+
+  /* On wider screens the bottom nav becomes a floating bar; keep enough
+     bottom padding so content isn't obscured. */
+  @media (min-width: 768px) {
+    .main-content {
+      padding-bottom: 140px;
+    }
+  }
 
 .page-title {
   font-size: 24px;

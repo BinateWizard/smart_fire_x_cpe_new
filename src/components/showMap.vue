@@ -1,7 +1,7 @@
 <template>
   <div class="map-container">
     <div class="map-header">
-      <button class="close-btn" @click="$emit('close')">Close</button>
+      <button class="close-btn" @click="close">Close</button>
     </div>
     <div id="map"></div>
   </div>
@@ -9,10 +9,31 @@
 
 <script setup>
 import { onMounted, onUnmounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { defineEmits } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+const emit = defineEmits(['close'])
+const router = useRouter()
+const route = useRoute()
+
 let map = null
+
+function close() {
+  // Notify parent (modal) that it should close
+  emit('close')
+
+  // If this component was visited via the /map route, navigate away so Close does something
+  if (route.name === 'map' || route.path === '/map') {
+    // Prefer going back in history, otherwise push to home
+    if (window.history.length > 1) {
+      router.back()
+    } else {
+      router.push({ path: '/' })
+    }
+  }
+}
 
 onMounted(() => {
   // basic leaflet map centered on a default location
