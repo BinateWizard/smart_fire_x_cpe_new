@@ -59,19 +59,19 @@ const unreadCount = ref(0)
 <style scoped>
 /* Mobile-first: show bottom nav on small viewports only */
 .bottom-nav {
-  /* Fixed to bottom of viewport, centered to match main content width */
+  /* Fixed to viewport bottom, centered to match app-container width exactly */
   position: fixed;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: min(400px, 96%);
+  width: 100%;
+  max-width: 400px;
   height: 72px;
   display: flex;
   justify-content: space-around;
   align-items: center;
-  background: #f1f5f9; /* nav background: light slate */
-  border-top: 1px solid #e2e8f0;
-  border-radius: 12px 12px 0 0;
+  background: #f37021; /* nav background: orange */
+  border-top: 1px solid rgba(0,0,0,0.06);
   box-shadow: 0 -8px 24px rgba(0,0,0,0.12);
   z-index: 999;
 }
@@ -79,7 +79,7 @@ const unreadCount = ref(0)
   display: flex;
   flex-direction: column;
   align-items: center;
-  color: #374151; /* darker text for contrast on the tinted background */
+  color: #ffffff; /* white text/icons on orange */
   text-decoration: none;
   font-size: 12px;
   padding: 6px 8px;
@@ -95,8 +95,8 @@ const unreadCount = ref(0)
   position: absolute;
   top: -6px;
   right: -6px;
-  background: #ef4444;
-  color: white;
+  background: #ffffff;
+  color: #f37021;
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 999px;
@@ -104,24 +104,12 @@ const unreadCount = ref(0)
 .nav-icon-container { position: relative; }
 .map-action { transform: translateY(-6px); }
 
-/* Desktop: show a centered, floating bottom nav rather than full-width */
+/* Desktop: keep the same bottom-flush behavior */
 @media (min-width: 768px) {
-  /* On larger screens keep the nav slightly above the bottom and narrower */
   .bottom-nav {
-    bottom: 24px;
-    width: min(480px, 80%);
-    height: 64px;
-    border-radius: 12px;
-    padding: 8px 12px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+    /* Keep bottom: 0, same width, just match desktop styling */
+    height: 72px;
   }
-
-  .nav-item {
-    padding: 4px 10px;
-    font-size: 13px;
-  }
-
-  .map-action { transform: translateY(-6px); }
 }
 
 </style>

@@ -1,21 +1,25 @@
 <template>
   <div class="app-container">
-    <!-- Header -->
-    <div class="header"></div>
+    <!-- Header with back button -->
+    <div class="header">
+      <button @click="$router.back()" class="back-btn">
+        <ChevronLeft class="back-icon" />
+      </button>
+      <h1 class="header-title">{{ deviceName }}</h1>
+    </div>
 
     <!-- Main Content -->
     <div class="main-content">
-      <!-- Title -->
-      <h1 class="page-title">STATUS OVERVIEW</h1>
-
       <!-- Status Circle -->
       <div class="status-section" v-if="latest">
-        <div class="status-circle">
+        <div class="status-circle" :class="{ 'alert-circle': latest.status === 'Alert' }">
           <div class="status-icon-container">
             <Bell class="status-bell-icon" />
           </div>
         </div>
-        <div class="status-label">{{ latest.status }}</div>
+        <div class="status-label" :class="{ 'alert-label': latest.status === 'Alert' }">
+          {{ latest.status }}
+        </div>
       </div>
 
       <!-- Time and Date -->
@@ -25,9 +29,9 @@
       </div>
 
       <!-- Location -->
-      <div class="location-section" v-if="latest && latest.location">
+      <div class="location-section" v-if="deviceLocation">
         <MapPin class="location-icon" />
-        <span class="location-text">{{ latest.location }}</span>
+        <span class="location-text">{{ deviceLocation }}</span>
       </div>
 
       <!-- Smoke & Gas Indicators -->
@@ -37,8 +41,7 @@
           <div class="smoke-bar-container">
             <div 
               class="smoke-bar" 
-              :style="{ width: smokePercentage + '%' }"
-              :class="{ 'smoke-warning': smokePercentage > 60, 'smoke-alert': smokePercentage > 80 }"
+              :style="{ width: smokePercentage + '%', backgroundColor: getSmokeColor(smokePercentage) }"
             ></div>
             <span class="smoke-value">{{ smokePercentage }}%</span>
           </div>
@@ -51,12 +54,13 @@
           </div>
         </div>
       </div>
-<showMap v-if="showMapModal" @close="closeMap" />
+
+      <showMap v-if="showMapModal" @close="closeMap" />
 
       <!-- Recent Status History -->
       <div class="history-section">
         <h2 class="history-title">RECENT STATUS HISTORY</h2>
-        <div class="history-list">
+        <div class="history-list" v-if="history.length > 0">
           <div 
             v-for="entry in history" 
             :key="entry.id" 
@@ -93,103 +97,42 @@
             </div>
           </div>
         </div>
-
-        <!-- View Full History Link -->
-        <div class="view-full-history">
-          <a href="#" class="history-link">View Full History</a>
-        </div>
+        <div v-else class="no-data">No history available for this device</div>
       </div>
     </div>
-
-      </div>
+  </div>
 </template>
 
 <script setup>
 import showMap from "@/components/showMap.vue";
-
 import { ref, onMounted, onUnmounted, computed } from "vue";
+import { useRoute } from "vue-router";
 import { 
-  collection, query, orderBy, limit, getDocs, 
-  doc, setDoc, updateDoc, getDoc, serverTimestamp 
+  collection, query, orderBy, limit, getDocs, where,
+  doc, getDoc
 } from "firebase/firestore";
 import { db } from "@/firebase";
 import { 
   Bell, 
   MapPin, 
   Check, 
-  AlertTriangle, 
-  Settings 
+  AlertTriangle,
+  ChevronLeft
 } from 'lucide-vue-next'
+
+const route = useRoute();
+const deviceId = computed(() => route.params.deviceId);
+const deviceName = ref('Loading...');
+const deviceLocation = ref('');
 
 const latest = ref(null);
 const history = ref([]);
 const lastUpdated = ref(new Date());
-
-// Device/location tracking
-const deviceId = ref(null);
-const locationWatcher = ref(null);
 const showMapModal = ref(false);
 
-function openMap() {
-  showMapModal.value = true;
-}
 function closeMap() {
   showMapModal.value = false;
 }
-
-function getOrCreateDeviceId() {
-  let id = localStorage.getItem("deviceId");
-  if (!id) {
-    id = "dev-" + Math.random().toString(36).substring(2, 12);
-    localStorage.setItem("deviceId", id);
-  }
-  return id;
-}
-
-async function saveLocation(lat, lng) {
-  try {
-    const deviceRef = doc(db, "devices", deviceId.value);
-    const docSnap = await getDoc(deviceRef);
-
-    if (!docSnap.exists()) {
-      await setDoc(deviceRef, {
-        deviceId: deviceId.value,
-        location: { lat, lng },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      console.log("✅ Device registered in Firestore");
-    } else {
-      await updateDoc(deviceRef, {
-        location: { lat, lng },
-        updatedAt: serverTimestamp()
-      });
-      console.log("📍 Device location updated:", lat, lng);
-    }
-  } catch (err) {
-    console.error("❌ Error saving location:", err);
-  }
-}
-
-function trackLocation() {
-  if ("geolocation" in navigator) {
-    locationWatcher.value = navigator.geolocation.watchPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        saveLocation(lat, lng);
-      },
-      (error) => {
-        console.error("❌ Location error:", error);
-      },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
-    );
-  } else {
-    console.error("❌ Geolocation not supported");
-  }
-}
-
-// ================== SENSOR LOGIC ==================
 
 // Calculate smoke percentage from analog value (0–4095 → 0–100%)
 function getSmokePercentage(analogValue) {
@@ -203,19 +146,48 @@ function getSmokeLevel(analogValue) {
   return getSmokePercentage(analogValue);
 }
 
+function getSmokeColor(percentage) {
+  if (percentage > 80) return '#dc2626';
+  if (percentage > 60) return '#eab308';
+  return '#22c55e';
+}
+
+async function fetchDeviceInfo() {
+  try {
+    const deviceRef = doc(db, "devices", deviceId.value);
+    const docSnap = await getDoc(deviceRef);
+    
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      deviceName.value = data.name || data.deviceId || deviceId.value;
+      if (data.location && typeof data.location === 'string') {
+        deviceLocation.value = data.location;
+      } else if (data.location && data.location.lat) {
+        deviceLocation.value = `${data.location.lat.toFixed(4)}, ${data.location.lng.toFixed(4)}`;
+      }
+    } else {
+      deviceName.value = deviceId.value;
+    }
+  } catch (error) {
+    console.error("❌ Error fetching device info:", error);
+    deviceName.value = deviceId.value;
+  }
+}
+
 async function fetchData() {
   try {
     const q = query(
       collection(db, "sensors"),
+      where("deviceId", "==", deviceId.value),
       orderBy("createdAt", "desc"),
-      limit(5)
+      limit(10)
     );
 
     const snapshot = await getDocs(q);
     const results = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      dateTime: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt?.timestampValue)
+      dateTime: doc.data().createdAt?.toDate?.() || new Date()
     }));
 
     results.forEach(entry => {
@@ -232,23 +204,19 @@ async function fetchData() {
     history.value = results;
     lastUpdated.value = new Date();
 
-    console.log("✅ Data refreshed at:", lastUpdated.value.toLocaleTimeString());
+    console.log("✅ Device data refreshed at:", lastUpdated.value.toLocaleTimeString());
   } catch (error) {
-    console.error("❌ Error fetching data:", error);
+    console.error("❌ Error fetching device data:", error);
   }
 }
 
 onMounted(() => {
-  deviceId.value = getOrCreateDeviceId();
-  trackLocation();
+  fetchDeviceInfo();
   fetchData();
 
   const intervalId = setInterval(fetchData, 60000);
   onUnmounted(() => {
     clearInterval(intervalId);
-    if (locationWatcher.value) {
-      navigator.geolocation.clearWatch(locationWatcher.value);
-    }
   });
 });
 
@@ -275,13 +243,11 @@ const smokePercentage = computed(() => {
 });
 </script>
 
-
 <style scoped>
 .app-container {
   max-width: 400px;
   margin: 0 auto;
-  background-color: #fffaf0; /* main background: warm cream (distinct from browser white) */
-  /* Full viewport height, navbar overlays at bottom */
+  background-color: #fffaf0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -291,23 +257,38 @@ const smokePercentage = computed(() => {
 .header {
   background-color: #dc2626;
   height: 60px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
 }
 
-  .main-content {
+.back-btn {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.back-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.header-title {
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.main-content {
   padding: 24px 20px;
-  padding-bottom: 88px; /* 72px navbar + 16px extra spacing */
+  padding-bottom: 88px;
   flex: 1;
-  }
-
-
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #374151;
-  text-align: center;
-  margin: 0 0 40px 0;
-  letter-spacing: 0.5px;
 }
 
 .status-section {
@@ -329,6 +310,10 @@ const smokePercentage = computed(() => {
   position: relative;
 }
 
+.status-circle.alert-circle {
+  background: linear-gradient(135deg, #fee2e2 0%, #fca5a5 100%);
+}
+
 .status-circle::before {
   content: '';
   position: absolute;
@@ -337,6 +322,11 @@ const smokePercentage = computed(() => {
   background-color: #22c55e;
   border-radius: 50%;
   box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+}
+
+.status-circle.alert-circle::before {
+  background-color: #ef4444;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
 .status-icon-container {
@@ -358,6 +348,11 @@ const smokePercentage = computed(() => {
   padding: 8px 24px;
   border-radius: 6px;
   letter-spacing: 1px;
+}
+
+.status-label.alert-label {
+  background-color: #fca5a5;
+  color: #7f1d1d;
 }
 
 .time-section {
@@ -398,7 +393,6 @@ const smokePercentage = computed(() => {
   font-weight: 500;
 }
 
-/* ========== NEW: SENSOR INDICATORS ========= */
 .sensor-section {
   margin: 32px 0;
   padding: 16px;
@@ -409,6 +403,10 @@ const smokePercentage = computed(() => {
 
 .sensor-item {
   margin-bottom: 16px;
+}
+
+.sensor-item:last-child {
+  margin-bottom: 0;
 }
 
 .sensor-item label {
@@ -428,18 +426,8 @@ const smokePercentage = computed(() => {
 .smoke-bar {
   flex-grow: 1;
   height: 12px;
-  background-color: #e0e0e0;
   border-radius: 6px;
-  overflow: hidden;
-  transition: width 0.3s ease;
-}
-
-.smoke-bar.smoke-warning {
-  background-color: #eab308; /* Amber */
-}
-
-.smoke-bar.smoke-alert {
-  background-color: #dc2626; /* Red */
+  transition: all 0.3s ease;
 }
 
 .smoke-value {
@@ -464,7 +452,6 @@ const smokePercentage = computed(() => {
   color: #92400e;
 }
 
-/* ========== HISTORY SECTION ========= */
 .history-section {
   margin-top: 32px;
 }
@@ -554,69 +541,10 @@ const smokePercentage = computed(() => {
   padding-left: 36px;
 }
 
-.view-full-history {
+.no-data {
   text-align: center;
-  margin-top: 24px;
-}
-
-.history-link {
-  color: #374151;
-  text-decoration: underline;
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.history-link:hover {
-  color: #111827;
-}
-
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 400px;
-  background: white;
-  border-top: 1px solid #e5e7eb;
-  display: flex;
-  justify-content: space-around;
-  padding: 8px 0;
-}
-
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.nav-item.active .nav-icon {
-  color: #dc2626;
-}
-
-.nav-item.active .nav-label {
-  color: #dc2626;
-}
-
-.nav-icon {
-  width: 24px;
-  height: 24px;
   color: #9ca3af;
-  margin-bottom: 4px;
-}
-
-.nav-label {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.nav-item:hover .nav-icon,
-.nav-item:hover .nav-label {
-  color: #6b7280;
+  padding: 40px 20px;
+  font-size: 15px;
 }
 </style>
