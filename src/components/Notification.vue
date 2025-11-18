@@ -3,184 +3,175 @@
     <!-- Header -->
     <div class="header">
       <div class="header-content">
-        <ChevronLeft class="back-icon" /> //when pressed, it should navigate back to the previous page
+        <button class="back-btn" @click="$router.back()" aria-label="Back">
+          <ChevronLeft class="back-icon" />
+        </button>
         <h1 class="header-title">Event History</h1>
       </div>
     </div>
 
-    <!-- Event List -->
     <div class="event-list">
-      <!-- Safe Event 1 -->
-      <div class="event-card">
-        <div class="event-content">
-          <div class="event-left">
-            <div class="status-icon safe">
-              <Check class="icon" />
+      <div v-if="loading" class="empty">Loading events…</div>
+      <div v-else-if="events.length === 0" class="empty">No notifications yet</div>
+
+      <div v-else class="event-items">
+        <div v-for="e in events" :key="e.id" class="event-card" :class="{ detailed: e.type !== 'safe' }">
+          <div class="event-content">
+            <div class="event-left">
+              <div class="status-icon" :class="e.type">
+                <component :is="iconFor(e.type)" class="icon" />
+              </div>
+              <div class="event-info">
+                <div class="event-date">{{ formatDate(e.dateTime) }}</div>
+                <div class="event-status">{{ e.title }}</div>
+                <div class="event-device">{{ e.deviceName }}</div>
+              </div>
             </div>
-            <div class="event-info">
-              <div class="event-date">2025-04-14</div>
-              <div class="event-status">Safe</div>
+            <div class="event-right">
+              <div class="event-time">{{ formatTime(e.dateTime) }}</div>
+              <div v-if="e.temperature !== undefined" class="temperature">{{ e.temperature }}°C</div>
             </div>
           </div>
-          <div class="event-right">
-            <div class="event-time">10:04 AM</div>
-            <div class="temperature">20°C</div>
+          <div v-if="e.details" class="event-details">
+            <div v-for="(val, key) in e.details" :key="key" class="detail-item">
+              <span class="detail-label">{{ key }}:</span> {{ val }}
+            </div>
           </div>
         </div>
       </div>
-
-      <!-- Safe Event 2 -->
-      <div class="event-card">
-        <div class="event-content">
-          <div class="event-left">
-            <div class="status-icon safe">
-              <Check class="icon" />
-            </div>
-            <div class="event-info">
-              <div class="event-date">2025-04-13</div>
-              <div class="event-status">Safe</div>
-            </div>
-          </div>
-          <div class="event-right">
-            <div class="event-time">7:22 PM</div>
-            <div class="temperature">25°C</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Alert Event -->
-      <div class="event-card">
-        <div class="event-content">
-          <div class="event-left">
-            <div class="status-icon alert">
-              <AlertTriangle class="icon" />
-            </div>
-            <div class="event-info">
-              <div class="event-date">2025-04-13</div>
-              <div class="event-status">Alert</div>
-            </div>
-          </div>
-          <div class="event-right">
-            <div class="event-time">7:22 PM</div>
-            <div class="temperature">70°C</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Alarm Triggered Event -->
-      <div class="event-card detailed">
-        <div class="event-content">
-          <div class="event-left">
-            <div class="status-icon alarm">
-              <Bell class="icon" />
-            </div>
-            <div class="event-info">
-              <div class="event-date">2025-04-14</div>
-              <div class="event-status">[ALARM TRIGGERED]</div>
-            </div>
-          </div>
-          <div class="event-right">
-            <div class="event-time">08:23 AM</div>
-          </div>
-        </div>
-        <div class="event-details">
-          <div class="detail-item">
-            <span class="detail-label">Location:</span> Store 102, Bansud Public Market
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">Initiated by:</span> Fire Alarm Button
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">Status:</span> Fire alarm activated
-          </div>
-        </div>
-      </div>
-
-      <!-- Reset Initiated Event 1 -->
-      <div class="event-card detailed">
-        <div class="event-content">
-          <div class="event-left">
-            <div class="status-icon safe">
-              <Check class="icon" />
-            </div>
-            <div class="event-info">
-              <div class="event-date">2025-03-21</div>
-              <div class="event-status">[RESET INITIATED]</div>
-            </div>
-          </div>
-          <div class="event-right">
-            <div class="event-time">07:16 PM</div>
-          </div>
-        </div>
-        <div class="event-details">
-          <div class="detail-item">
-            <span class="detail-label">Reset performed by:</span> Admin (ID: 10234)
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">Remarks:</span> False alarm - accidentally pressed
-          </div>
-        </div>
-      </div>
-
-      <!-- Reset Initiated Event 2 -->
-      <div class="event-card detailed">
-        <div class="event-content">
-          <div class="event-left">
-            <div class="status-icon alert">
-              <AlertTriangle class="icon" />
-            </div>
-            <div class="event-info">
-              <div class="event-date">2025-03-02</div>
-              <div class="event-status">[RESET INITIATED]</div>
-            </div>
-          </div>
-          <div class="event-right">
-            <div class="event-time">07:16 PM</div>
-          </div>
-        </div>
-        <div class="event-details">
-          <div class="detail-item">
-            <span class="detail-label">Reset performed by:</span> Admin (ID: 10234)
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">Remarks:</span> False alarm - accidentally pressed
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Bottom Navigation -->
-    <div class="bottom-nav">
-      <button class="nav-item active">
-        <Home class="nav-icon" />
-        <span class="nav-label">home</span>
-      </button>
-      <button class="nav-item">
-        <MapPin class="nav-icon" />
-        <span class="nav-label">location</span>
-      </button>
-      <button class="nav-item">
-        <Bell class="nav-icon" />
-        <span class="nav-label">notification</span>
-      </button>
-      <button class="nav-item">
-        <Settings class="nav-icon" />
-        <span class="nav-label">settings</span>
-      </button>
     </div>
   </div>
+  
 </template>
 
 <script setup>
-import { 
-  ChevronLeft, 
-  Check, 
-  AlertTriangle, 
-  Bell, 
-  Home, 
-  MapPin, 
-  Settings 
-} from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { ChevronLeft, Check, AlertTriangle, Bell } from 'lucide-vue-next'
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
+import { ref as dbRef, onValue } from 'firebase/database'
+import { db, rtdb } from '@/firebase'
+
+const loading = ref(true)
+const events = ref([])
+let detachFns = []
+
+function iconFor(type) {
+  if (type === 'alarm') return Bell
+  if (type === 'alert') return AlertTriangle
+  return Check
+}
+
+function formatTime(date) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric', hour12: true }).format(date)
+  } catch { return '' }
+}
+function formatDate(date) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+  } catch { return '' }
+}
+
+function classify(entry) {
+  if (!entry) return { type: 'safe', title: 'Safe' }
+  if (entry.message === 'help requested') return { type: 'alert', title: 'Help Requested' }
+  if (entry.message === 'alarm has been triggered') return { type: 'alarm', title: 'Alarm Triggered' }
+  const smoke = entry.smokeLevel ?? entry.smoke ?? 0
+  if (typeof smoke === 'number' && smoke > 1500) return { type: 'alert', title: 'High Smoke' }
+  if (entry.status === 'Alert') return { type: 'alert', title: 'Alert' }
+  return { type: 'safe', title: 'Safe' }
+}
+
+async function buildListeners() {
+  loading.value = true
+  events.value = []
+  detachFns.forEach(off => off())
+  detachFns = []
+
+  // Get devices registry
+  const snap = await getDocs(collection(db, 'devices'))
+  const docs = snap.docs
+  if (docs.length === 0) {
+    loading.value = false
+    return
+  }
+
+  // For each device, read metadata (name) and subscribe to readings + current node
+  for (const d of docs) {
+    const id = d.id
+    let name = d.data().name || id
+    try {
+      // refresh name from Firestore doc (in case)
+      const meta = await getDoc(doc(db, 'devices', id))
+      if (meta.exists()) name = meta.data().name || name
+    } catch {}
+
+    // Listen to current snapshot
+    const curRef = dbRef(rtdb, `devices/${id}`)
+    const offCur = onValue(curRef, (s) => {
+      const val = s.val()
+      if (!val) return
+      const dt = val.timestamp ? new Date(val.timestamp) : new Date()
+      const cls = classify(val)
+      // Only push non-safe items as notifications
+      if (cls.type !== 'safe') {
+        events.value.unshift({
+          id: `${id}-current-${dt.getTime()}`,
+          deviceId: id,
+          deviceName: name,
+          dateTime: dt,
+          temperature: val.temperature,
+          details: val.gasStatus ? { Gas: val.gasStatus } : null,
+          type: cls.type,
+          title: cls.title
+        })
+        // keep list reasonable
+        events.value = events.value
+          .sort((a,b) => b.dateTime - a.dateTime)
+          .slice(0, 50)
+      }
+    })
+    detachFns.push(() => offCur())
+
+    // Listen to history if exists
+    const histRef = dbRef(rtdb, `devices/${id}/readings`)
+    const offHist = onValue(histRef, (s) => {
+      const obj = s.val()
+      if (!obj) return
+      const list = Object.entries(obj).map(([key, v]) => {
+        const dt = v.timestamp ? new Date(v.timestamp) : new Date()
+        const cls = classify(v)
+        return {
+          id: `${id}-hist-${key}`,
+          deviceId: id,
+          deviceName: name,
+          dateTime: dt,
+          temperature: v.temperature,
+          details: v.gasStatus ? { Gas: v.gasStatus } : null,
+          type: cls.type,
+          title: cls.title
+        }
+      })
+      // Only keep alert/alarm/help entries
+      const filtered = list.filter(e => e.type !== 'safe')
+      // Merge with current events (dedupe by id)
+      const map = new Map(events.value.map(e => [e.id, e]))
+      filtered.forEach(e => map.set(e.id, e))
+      events.value = Array.from(map.values()).sort((a,b) => b.dateTime - a.dateTime).slice(0, 100)
+    })
+    detachFns.push(() => offHist())
+  }
+
+  loading.value = false
+}
+
+onMounted(() => {
+  buildListeners()
+})
+onUnmounted(() => {
+  detachFns.forEach(off => off())
+  detachFns = []
+})
 </script>
 
 <style scoped>
@@ -330,53 +321,5 @@ import {
   color: #374151;
 }
 
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 400px;
-  background: white;
-  border-top: 1px solid #e5e7eb;
-  display: flex;
-  justify-content: space-around;
-  padding: 8px 0;
-}
-
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.nav-item.active .nav-icon {
-  color: #dc2626;
-}
-
-.nav-item.active .nav-label {
-  color: #dc2626;
-}
-
-.nav-icon {
-  width: 24px;
-  height: 24px;
-  color: #9ca3af;
-  margin-bottom: 4px;
-}
-
-.nav-label {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.nav-item:hover .nav-icon,
-.nav-item:hover .nav-label {
-  color: #6b7280;
-}
+.back-btn { background: none; border: none; color: white; display: flex; align-items: center; }
 </style>

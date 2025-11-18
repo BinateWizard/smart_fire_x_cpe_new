@@ -1,11 +1,11 @@
 <template>
   <div id="app">
     <router-view />
-    <BottomNav />
+    <InstallPrompt />
   </div>
 </template>
 
 <script setup>
-import BottomNav from '@/components/BottomNav.vue'
+import InstallPrompt from '@/components/InstallPrompt.vue'
 </script>
 

@@ -10,6 +10,22 @@
 
     <!-- Main Content -->
     <div class="main-content">
+      <!-- Loading State -->
+      <div v-if="loading" class="loading-section">
+        <div class="loading-spinner">⏳</div>
+        <div class="loading-text">Connecting to device...</div>
+      </div>
+
+      <!-- No Data State -->
+      <div v-else-if="noData" class="no-data-section">
+        <div class="no-data-icon">📡</div>
+        <div class="no-data-title">Device Offline</div>
+        <div class="no-data-text">{{ deviceName }} is not sending data to Realtime Database.</div>
+        <div class="no-data-hint">Check: /devices/{{ deviceId }}</div>
+      </div>
+
+      <!-- Device Dashboard (when data available) -->
+      <div v-else>
       <!-- Status Circle -->
       <div class="status-section" v-if="latest">
         <div class="status-circle" :class="{ 'alert-circle': latest.status === 'Alert' }">
@@ -20,6 +36,24 @@
         <div class="status-label" :class="{ 'alert-label': latest.status === 'Alert' }">
           {{ latest.status }}
         </div>
+      </div>
+
+      <!-- Sensor Error Warning -->
+      <div v-if="latest && latest.sensorError === true" class="error-banner">
+        ⚠️ <strong>Sensor Error Detected</strong><br>
+        DHT11 sensor is not responding. Check wiring and power.
+      </div>
+
+      <!-- Alarm Alert -->
+      <div v-if="latest && latest.lastType === 'alarm'" class="alert-banner">
+        🔥 <strong>Alarm Triggered!</strong><br>
+        Device detected critical condition at {{ formatTime(latest.dateTime) }}
+      </div>
+
+      <!-- Gas Alert -->
+      <div v-if="latest && (latest.gasStatus === 'detected' || latest.gasStatus === 'critical')" class="warning-banner">
+        ⚠️ <strong>Gas Detected!</strong><br>
+        Critical gas levels detected. Take immediate action.
       </div>
 
       <!-- Time and Date -->
@@ -49,8 +83,10 @@
 
         <div class="sensor-item">
           <label>GAS STATUS</label>
-          <div class="gas-status" :class="{ 'gas-high': latest.gasStatus === 'high' }">
-            {{ latest.gasStatus === 'high' ? '⚠️ HIGH' : '✅ NORMAL' }}
+          <div class="gas-status" :class="{ 'gas-high': latest.gasStatus === 'detected' || latest.gasStatus === 'critical' || latest.gasStatus === 'high' }">
+            <span v-if="latest.gasStatus === 'detected' || latest.gasStatus === 'critical'">⚠️ DETECTED</span>
+            <span v-else-if="latest.gasStatus === 'high'">⚠️ HIGH</span>
+            <span v-else>✅ NORMAL</span>
           </div>
         </div>
       </div>
@@ -74,30 +110,44 @@
                 <component :is="entry.status === 'Safe' ? Check : AlertTriangle" class="icon" />
               </div>
               <div class="history-info">
-                <div class="history-status">{{ entry.status }}</div>
+                <div class="history-status">
+                  <span v-if="entry.lastType === 'alarm'">🔥 Alarm Triggered</span>
+                  <span v-else-if="entry.sensorError">⚠️ Sensor Error</span>
+                  <span v-else-if="entry.gasStatus === 'detected' || entry.gasStatus === 'critical'">⚠️ Gas Detected</span>
+                  <span v-else>{{ entry.status }}</span>
+                </div>
                 <div class="history-time">
                   {{ formatTime(entry.dateTime) }}, {{ formatDate(entry.dateTime) }}
                 </div>
               </div>
             </div>
-            <div class="history-temperature" v-if="entry.temperature !== undefined">
+            <div class="history-temperature" v-if="entry.temperature !== undefined && !entry.sensorError">
               {{ entry.temperature }}°C
             </div>
-            <div class="history-temperature" v-else-if="entry.message === 'help requested'">
+            <div class="history-temperature" v-else-if="entry.sensorError">
+              ⚠️ Error
+            </div>
+            <div class="history-temperature" v-else-if="entry.message === 'help requested' || entry.message === 'Sensor Error'">
               🆘 Help
             </div>
             <div class="history-temperature" v-else-if="entry.message === 'alarm has been triggered'">
               🔥 Alarm
             </div>
+            <div class="history-temperature" v-else>
+              N/A
+            </div>
 
             <!-- Show Smoke & Gas in History -->
-            <div class="history-extra" v-if="entry.smokeAnalog !== undefined">
-              Smoke: {{ getSmokeLevel(entry.smokeAnalog) }}%
-              <span v-if="entry.gasStatus === 'high'" style="color: #eab308; margin-left: 8px;">⚡ Gas: High</span>
+            <div class="history-extra" v-if="entry.smokeAnalog !== undefined || entry.gasStatus">
+              <span v-if="entry.smokeAnalog">Smoke: {{ getSmokeLevel(entry.smokeAnalog) }}%</span>
+              <span v-if="entry.gasStatus && entry.gasStatus !== 'normal'" style="color: #eab308; margin-left: 8px;">
+                ⚡ Gas: {{ entry.gasStatus === 'detected' || entry.gasStatus === 'critical' ? 'Detected' : entry.gasStatus }}
+              </span>
             </div>
           </div>
         </div>
         <div v-else class="no-data">No history available for this device</div>
+      </div>
       </div>
     </div>
   </div>
@@ -107,11 +157,9 @@
 import showMap from "@/components/showMap.vue";
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRoute } from "vue-router";
-import { 
-  collection, query, orderBy, limit, getDocs, where,
-  doc, getDoc
-} from "firebase/firestore";
-import { db } from "@/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { ref as dbRef, onValue, query, orderByChild, limitToLast } from "firebase/database";
+import { db, rtdb } from "@/firebase";
 import { 
   Bell, 
   MapPin, 
@@ -129,6 +177,8 @@ const latest = ref(null);
 const history = ref([]);
 const lastUpdated = ref(new Date());
 const showMapModal = ref(false);
+const loading = ref(true);
+const noData = ref(false);
 
 function closeMap() {
   showMapModal.value = false;
@@ -175,49 +225,95 @@ async function fetchDeviceInfo() {
 }
 
 async function fetchData() {
+  loading.value = true;
+  noData.value = false;
+  
   try {
-    const q = query(
-      collection(db, "sensors"),
-      where("deviceId", "==", deviceId.value),
-      orderBy("createdAt", "desc"),
-      limit(10)
-    );
-
-    const snapshot = await getDocs(q);
-    const results = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      dateTime: doc.data().createdAt?.toDate?.() || new Date()
-    }));
-
-    results.forEach(entry => {
-      if (entry.message === "help requested" || entry.message === "alarm has been triggered") {
-        entry.status = "Alert";
-      } else if (entry.smokeAnalog !== undefined) {
-        entry.status = entry.smokeAnalog > 1500 ? "Alert" : "Safe";
+    // Listen to live data from Realtime Database at /devices/{deviceId}
+    const deviceDataRef = dbRef(rtdb, `devices/${deviceId.value}`);
+    
+    onValue(deviceDataRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        
+        // Process current/latest data
+        const currentData = {
+          id: Date.now(),
+          dateTime: data.lastSeen ? new Date(data.lastSeen) : (data.timestamp ? new Date(data.timestamp) : new Date()),
+          smokeAnalog: data.smokeLevel || data.smoke || data.smokeAnalog || 0,
+          gasStatus: data.gasStatus || 'normal',
+          temperature: data.temperature,
+          humidity: data.humidity,
+          message: data.message || (data.sensorError ? 'Sensor Error' : ''),
+          sensorError: data.sensorError || false,
+          lastType: data.lastType,
+          status: determineStatus(data)
+        };
+        
+        latest.value = currentData;
+        loading.value = false;
+        noData.value = false;
+        
+        // Build history from readings if available
+        if (data.readings && typeof data.readings === 'object') {
+          const readingsArray = Object.entries(data.readings)
+            .map(([key, value]) => ({
+              id: key,
+              dateTime: value.lastSeen ? new Date(value.lastSeen) : (value.timestamp ? new Date(value.timestamp) : new Date()),
+              smokeAnalog: value.smokeLevel || value.smoke || value.smokeAnalog || 0,
+              gasStatus: value.gasStatus || 'normal',
+              temperature: value.temperature,
+              humidity: value.humidity,
+              message: value.message || (value.sensorError ? 'Sensor Error' : ''),
+              sensorError: value.sensorError || false,
+              status: determineStatus(value)
+            }))
+            .sort((a, b) => b.dateTime - a.dateTime)
+            .slice(0, 10);
+          
+          history.value = readingsArray;
+        } else {
+          // If no history, just show current reading
+          history.value = [currentData];
+        }
+        
+        lastUpdated.value = new Date();
+        console.log("✅ Device data updated at:", lastUpdated.value.toLocaleTimeString());
       } else {
-        entry.status = "Safe";
+        console.warn("⚠️ No data found for device:", deviceId.value);
+        loading.value = false;
+        noData.value = true;
+        latest.value = null;
+        history.value = [];
       }
+    }, (error) => {
+      console.error("❌ Error fetching device data:", error);
+      loading.value = false;
+      noData.value = true;
     });
-
-    latest.value = results[0] || null;
-    history.value = results;
-    lastUpdated.value = new Date();
-
-    console.log("✅ Device data refreshed at:", lastUpdated.value.toLocaleTimeString());
   } catch (error) {
-    console.error("❌ Error fetching device data:", error);
+    console.error("❌ Error setting up data listener:", error);
   }
+}
+
+function determineStatus(data) {
+  if (data.sensorError) {
+    return "Alert"; // Sensor error is an alert condition
+  }
+  if (data.message === "help requested" || data.message === "alarm has been triggered") {
+    return "Alert";
+  } else if (data.smokeLevel !== undefined || data.smoke !== undefined || data.smokeAnalog !== undefined) {
+    const smokeValue = data.smokeLevel || data.smoke || data.smokeAnalog || 0;
+    return smokeValue > 1500 ? "Alert" : "Safe";
+  } else if (data.status) {
+    return data.status;
+  }
+  return "Safe";
 }
 
 onMounted(() => {
   fetchDeviceInfo();
-  fetchData();
-
-  const intervalId = setInterval(fetchData, 60000);
-  onUnmounted(() => {
-    clearInterval(intervalId);
-  });
+  fetchData(); // Sets up real-time listener
 });
 
 // Format helpers
@@ -289,6 +385,48 @@ const smokePercentage = computed(() => {
   padding: 24px 20px;
   padding-bottom: 88px;
   flex: 1;
+}
+
+.error-banner {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border: 2px solid #ef4444;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 24px;
+  text-align: center;
+  color: #991b1b;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.alert-banner {
+  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+  border: 2px solid #f97316;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 24px;
+  text-align: center;
+  color: #7c2d12;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.warning-banner {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 2px solid #eab308;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 24px;
+  text-align: center;
+  color: #713f12;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.error-banner strong {
+  font-size: 16px;
+  display: block;
+  margin-bottom: 4px;
 }
 
 .status-section {
@@ -546,5 +684,59 @@ const smokePercentage = computed(() => {
   color: #9ca3af;
   padding: 40px 20px;
   font-size: 15px;
+}
+
+.loading-section,
+.no-data-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.loading-spinner {
+  font-size: 48px;
+  margin-bottom: 16px;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 16px;
+  color: #6b7280;
+}
+
+.no-data-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.no-data-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.no-data-text {
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 12px;
+}
+
+.no-data-hint {
+  font-size: 12px;
+  color: #9ca3af;
+  font-family: monospace;
+  background: #f3f4f6;
+  padding: 8px 12px;
+  border-radius: 6px;
 }
 </style>

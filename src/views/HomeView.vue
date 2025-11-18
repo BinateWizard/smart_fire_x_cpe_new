@@ -1,508 +1,579 @@
 <template>
   <div class="app-container">
-    <!-- Header -->
-    <div class="header"></div>
+    <!-- Fixed Top Navigation -->
+    <div class="top-nav">
+      <button @click="toggleMenu" class="nav-btn" aria-label="Menu">
+        <Menu class="nav-icon" />
+      </button>
+      <div class="nav-spacer"></div>
+      <button @click="goToNotifications" class="nav-btn" aria-label="Notifications">
+        <Bell class="nav-icon" />
+      </button>
+      <button @click="goToLocation" class="nav-btn" aria-label="Location">
+        <MapPin class="nav-icon" />
+      </button>
+    </div>
+
+    <!-- Side Drawer Menu -->
+    <transition name="drawer">
+      <div v-if="menuOpen" class="drawer-overlay" @click="toggleMenu">
+        <div class="drawer" @click.stop>
+          <div class="drawer-header">
+            <h2>Menu</h2>
+            <button @click="toggleMenu" class="close-btn" aria-label="Close">
+              <X class="nav-icon" />
+            </button>
+          </div>
+          <nav class="drawer-nav">
+            <a @click="navigateTo('/')" class="drawer-link">
+              <Bell class="drawer-icon" /> Devices
+            </a>
+            <a @click="navigateTo('/notifications')" class="drawer-link">
+              <Bell class="drawer-icon" /> Notifications
+            </a>
+            <a @click="navigateTo('/map')" class="drawer-link">
+              <MapPin class="drawer-icon" /> Location
+            </a>
+            <a @click="navigateTo('/settings')" class="drawer-link">
+              <Settings class="drawer-icon" /> Settings
+            </a>
+          </nav>
+        </div>
+      </div>
+    </transition>
 
     <!-- Main Content -->
     <div class="main-content">
-      <!-- Title -->
-      <h1 class="page-title">STATUS OVERVIEW</h1>
-
-      <!-- Status Circle -->
-      <div class="status-section" v-if="latest">
-        <div class="status-circle">
-          <div class="status-icon-container">
-            <Bell class="status-bell-icon" />
-          </div>
+      <!-- Stats Overview -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">{{ devices.length }}</div>
+          <div class="stat-label">Total Devices</div>
         </div>
-        <div class="status-label">{{ latest.status }}</div>
-      </div>
-
-      <!-- Time and Date -->
-      <div class="time-section" v-if="latest">
-        <div class="current-time">{{ formatTime(latest.dateTime) }}</div>
-        <div class="current-date">{{ formatDate(latest.dateTime) }}</div>
-      </div>
-
-      <!-- Location -->
-      <div class="location-section" v-if="latest && latest.location">
-        <MapPin class="location-icon" />
-        <span class="location-text">{{ latest.location }}</span>
-      </div>
-
-      <!-- Smoke & Gas Indicators -->
-      <div class="sensor-section" v-if="latest">
-        <div class="sensor-item">
-          <label>SMOKE LEVEL</label>
-          <div class="smoke-bar-container">
-            <div 
-              class="smoke-bar" 
-              :style="{ width: smokePercentage + '%' }"
-              :class="{ 'smoke-warning': smokePercentage > 60, 'smoke-alert': smokePercentage > 80 }"
-            ></div>
-            <span class="smoke-value">{{ smokePercentage }}%</span>
-          </div>
+        <div class="stat-card safe">
+          <div class="stat-value">{{ safeDevicesCount }}</div>
+          <div class="stat-label">Safe</div>
         </div>
-
-        <div class="sensor-item">
-          <label>GAS STATUS</label>
-          <div class="gas-status" :class="{ 'gas-high': latest.gasStatus === 'high' }">
-            {{ latest.gasStatus === 'high' ? '⚠️ HIGH' : '✅ NORMAL' }}
-          </div>
+        <div class="stat-card alert">
+          <div class="stat-value">{{ alertDevicesCount }}</div>
+          <div class="stat-label">Alerts</div>
         </div>
       </div>
-<showMap v-if="showMapModal" @close="closeMap" />
 
-      <!-- Recent Status History -->
-      <div class="history-section">
-        <h2 class="history-title">RECENT STATUS HISTORY</h2>
-        <div class="history-list">
+      <!-- Add Device Button -->
+      <div class="button-row">
+        <button @click="$router.push('/add-device')" class="add-device-btn">
+          <Plus class="icon" />
+          Add New Device
+        </button>
+        <button @click="$router.push('/debug')" class="debug-btn" title="Test Device Connection">
+          🔧
+        </button>
+      </div>
+
+      <!-- Device List -->
+      <div class="devices-section">
+        <h2 class="section-title">My Devices</h2>
+        
+        <div v-if="loading" class="loading">Loading devices...</div>
+        
+        <div v-else-if="devices.length === 0" class="empty-state">
+          <Inbox class="empty-icon" />
+          <p>No devices registered yet</p>
+          <button @click="$router.push('/add-device')" class="btn-primary-small">
+            Add Your First Device
+          </button>
+        </div>
+
+        <div v-else class="device-list">
           <div 
-            v-for="entry in history" 
-            :key="entry.id" 
-            class="history-item"
+            v-for="device in devices" 
+            :key="device.id" 
+            class="device-card"
+            @click="$router.push(`/device/${device.id}`)"
           >
-            <div class="history-left">
-              <div 
-                class="history-icon" 
-                :class="entry.status === 'Safe' ? 'safe' : 'alert'"
-              >
-                <component :is="entry.status === 'Safe' ? Check : AlertTriangle" class="icon" />
+            <div class="device-icon" :class="getStatusClass(device.status)">
+              <Bell class="icon" />
+            </div>
+            <div class="device-info">
+              <div class="device-name">{{ device.name || device.id }}</div>
+              <div class="device-location" v-if="device.location">
+                <MapPin class="loc-icon" />
+                {{ device.location }}
               </div>
-              <div class="history-info">
-                <div class="history-status">{{ entry.status }}</div>
-                <div class="history-time">
-                  {{ formatTime(entry.dateTime) }}, {{ formatDate(entry.dateTime) }}
-                </div>
+              <div class="device-status">
+                Last update: {{ formatRelativeTime(device.updatedAt) }}
               </div>
             </div>
-            <div class="history-temperature" v-if="entry.temperature !== undefined">
-              {{ entry.temperature }}°C
-            </div>
-            <div class="history-temperature" v-else-if="entry.message === 'help requested'">
-              🆘 Help
-            </div>
-            <div class="history-temperature" v-else-if="entry.message === 'alarm has been triggered'">
-              🔥 Alarm
-            </div>
-
-            <!-- Show Smoke & Gas in History -->
-            <div class="history-extra" v-if="entry.smokeAnalog !== undefined">
-              Smoke: {{ getSmokeLevel(entry.smokeAnalog) }}%
-              <span v-if="entry.gasStatus === 'high'" style="color: #eab308; margin-left: 8px;">⚡ Gas: High</span>
+            <div class="device-status-badge" :class="getStatusClass(device.status)">
+              {{ device.status || 'Safe' }}
             </div>
           </div>
-        </div>
-
-        <!-- View Full History Link -->
-        <div class="view-full-history">
-          <a href="#" class="history-link">View Full History</a>
         </div>
       </div>
     </div>
-
-      </div>
+  </div>
 </template>
 
 <script setup>
-import showMap from "@/components/showMap.vue";
-
 import { ref, onMounted, onUnmounted, computed } from "vue";
-import { 
-  collection, query, orderBy, limit, getDocs, 
-  doc, setDoc, updateDoc, getDoc, serverTimestamp 
-} from "firebase/firestore";
-import { db } from "@/firebase";
-import { 
-  Bell, 
-  MapPin, 
-  Check, 
-  AlertTriangle, 
-  Settings 
-} from 'lucide-vue-next'
+import { useRouter } from "vue-router";
+import { collection, query, getDocs, orderBy, where } from "firebase/firestore";
+import { ref as dbRef, onValue } from "firebase/database";
+import { db, rtdb, auth } from "@/firebase";
+import { Bell, MapPin, Plus, Inbox, Menu, X, Settings } from 'lucide-vue-next';
 
-const latest = ref(null);
-const history = ref([]);
-const lastUpdated = ref(new Date());
+const router = useRouter();
 
-// Device/location tracking
-const deviceId = ref(null);
-const locationWatcher = ref(null);
-const showMapModal = ref(false);
+const devices = ref([]);
+const loading = ref(true);
+const menuOpen = ref(false);
 
-function openMap() {
-  showMapModal.value = true;
-}
-function closeMap() {
-  showMapModal.value = false;
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value;
 }
 
-function getOrCreateDeviceId() {
-  let id = localStorage.getItem("deviceId");
-  if (!id) {
-    id = "dev-" + Math.random().toString(36).substring(2, 12);
-    localStorage.setItem("deviceId", id);
-  }
-  return id;
+function navigateTo(path) {
+  menuOpen.value = false;
+  router.push(path);
 }
 
-async function saveLocation(lat, lng) {
+function goToNotifications() {
+  router.push('/notifications');
+}
+
+function goToLocation() {
+  router.push('/map');
+}
+
+function getStatusClass(status) {
+  const statusStr = String(status || 'safe');
+  return statusStr.toLowerCase();
+}
+
+const safeDevicesCount = computed(() => 
+  devices.value.filter(d => d.status === 'Safe').length
+);
+
+const alertDevicesCount = computed(() => 
+  devices.value.filter(d => d.status === 'Alert').length
+);
+
+async function fetchDevices() {
+  loading.value = true;
   try {
-    const deviceRef = doc(db, "devices", deviceId.value);
-    const docSnap = await getDoc(deviceRef);
-
-    if (!docSnap.exists()) {
-      await setDoc(deviceRef, {
-        deviceId: deviceId.value,
-        location: { lat, lng },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      console.log("✅ Device registered in Firestore");
-    } else {
-      await updateDoc(deviceRef, {
-        location: { lat, lng },
-        updatedAt: serverTimestamp()
-      });
-      console.log("📍 Device location updated:", lat, lng);
-    }
-  } catch (err) {
-    console.error("❌ Error saving location:", err);
-  }
-}
-
-function trackLocation() {
-  if ("geolocation" in navigator) {
-    locationWatcher.value = navigator.geolocation.watchPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        saveLocation(lat, lng);
-      },
-      (error) => {
-        console.error("❌ Location error:", error);
-      },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
-    );
-  } else {
-    console.error("❌ Geolocation not supported");
-  }
-}
-
-// ================== SENSOR LOGIC ==================
-
-// Calculate smoke percentage from analog value (0–4095 → 0–100%)
-function getSmokePercentage(analogValue) {
-  const max = 4095;
-  const min = 0;
-  let percent = ((analogValue - min) / (max - min)) * 100;
-  return Math.min(100, Math.max(0, Math.round(percent)));
-}
-
-function getSmokeLevel(analogValue) {
-  return getSmokePercentage(analogValue);
-}
-
-async function fetchData() {
-  try {
+    // Get device list from Firestore (device registry) - accessible by all users
     const q = query(
-      collection(db, "sensors"),
-      orderBy("createdAt", "desc"),
-      limit(5)
+      collection(db, "devices"),
+      orderBy("updatedAt", "desc")
     );
-
     const snapshot = await getDocs(q);
-    const results = snapshot.docs.map(doc => ({
+    
+    const deviceList = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      dateTime: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt?.timestampValue)
+      status: 'Loading...', // Will be updated from Realtime DB
+      updatedAt: doc.data().updatedAt?.toDate?.() || new Date()
     }));
 
-    results.forEach(entry => {
-      if (entry.message === "help requested" || entry.message === "alarm has been triggered") {
-        entry.status = "Alert";
-      } else if (entry.smokeAnalog !== undefined) {
-        entry.status = entry.smokeAnalog > 1500 ? "Alert" : "Safe";
-      } else {
-        entry.status = "Safe";
-      }
+    devices.value = deviceList;
+
+    // Fetch live status from Realtime Database for each device
+    deviceList.forEach(device => {
+      const deviceDataRef = dbRef(rtdb, `devices/${device.id}`);
+      onValue(deviceDataRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          const deviceIndex = devices.value.findIndex(d => d.id === device.id);
+          if (deviceIndex !== -1) {
+            // Extract status as a clean string
+            devices.value[deviceIndex].status = determineStatus(data);
+            // Use lastSeen or timestamp for update time
+            const timestamp = data.lastSeen || data.timestamp;
+            devices.value[deviceIndex].updatedAt = timestamp ? new Date(timestamp) : new Date();
+            // Store gas status for display
+            devices.value[deviceIndex].gasStatus = data.gasStatus || 'normal';
+            devices.value[deviceIndex].lastType = data.lastType || 'normal';
+          }
+        } else {
+          // Device not sending data yet
+          const deviceIndex = devices.value.findIndex(d => d.id === device.id);
+          if (deviceIndex !== -1) {
+            devices.value[deviceIndex].status = 'Offline';
+          }
+        }
+      });
     });
 
-    latest.value = results[0] || null;
-    history.value = results;
-    lastUpdated.value = new Date();
-
-    console.log("✅ Data refreshed at:", lastUpdated.value.toLocaleTimeString());
+    console.log("✅ Devices loaded:", devices.value.length);
   } catch (error) {
-    console.error("❌ Error fetching data:", error);
+    console.error("❌ Error fetching devices:", error);
+  } finally {
+    loading.value = false;
   }
+}
+
+function determineStatus(data) {
+  // Always return a string, never an object
+  if (!data || typeof data !== 'object') return 'Safe';
+  
+  // Check for sensor error
+  if (data.sensorError === true) return 'Alert';
+  
+  // Check lastType field
+  if (data.lastType === 'alarm') return 'Alert';
+  
+  // Check for critical gas status
+  if (data.gasStatus === 'critical' || data.gasStatus === 'detected') return 'Alert';
+  
+  // Check messages
+  if (data.message === 'help requested' || data.message === 'alarm has been triggered') {
+    return 'Alert';
+  }
+  
+  // Check smoke levels
+  if (data.smokeLevel !== undefined || data.smoke !== undefined || data.smokeAnalog !== undefined) {
+    const smokeValue = data.smokeLevel || data.smoke || data.smokeAnalog || 0;
+    if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert';
+  }
+  
+  // Fallback to normal
+  return 'Safe';
+}
+
+function formatRelativeTime(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 
 onMounted(() => {
-  deviceId.value = getOrCreateDeviceId();
-  trackLocation();
-  fetchData();
-
-  const intervalId = setInterval(fetchData, 60000);
-  onUnmounted(() => {
-    clearInterval(intervalId);
-    if (locationWatcher.value) {
-      navigator.geolocation.clearWatch(locationWatcher.value);
-    }
-  });
-});
-
-// Format helpers
-function formatTime(date) {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true
-  }).format(date);
-}
-
-function formatDate(date) {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric"
-  }).format(date);
-}
-
-const smokePercentage = computed(() => {
-  return latest.value ? getSmokePercentage(latest.value.smokeAnalog) : 0;
+  fetchDevices(); // Real-time listeners are set up inside
 });
 </script>
-
 
 <style scoped>
 .app-container {
   max-width: 400px;
   margin: 0 auto;
-  background-color: #fffaf0; /* main background: warm cream (distinct from browser white) */
-  /* Full viewport height, navbar overlays at bottom */
+  background-color: #fffaf0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.header {
+/* Fixed Top Navigation */
+.top-nav {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 400px;
+  width: 100%;
   background-color: #dc2626;
   height: 60px;
-}
-
-  .main-content {
-  padding: 24px 20px;
-  padding-bottom: 88px; /* 72px navbar + 16px extra spacing */
-  flex: 1;
-  }
-
-
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #374151;
-  text-align: center;
-  margin: 0 0 40px 0;
-  letter-spacing: 0.5px;
-}
-
-.status-section {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  margin-bottom: 32px;
+  padding: 0 16px;
+  gap: 12px;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.status-circle {
-  width: 140px;
-  height: 140px;
-  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-  border-radius: 50%;
+.nav-btn {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 16px;
-  position: relative;
+  border-radius: 8px;
+  transition: background 0.2s;
 }
 
-.status-circle::before {
-  content: '';
-  position: absolute;
-  width: 100px;
-  height: 100px;
-  background-color: #22c55e;
-  border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+.nav-btn:active {
+  background: rgba(255, 255, 255, 0.15);
 }
 
-.status-icon-container {
-  position: relative;
-  z-index: 1;
+.nav-icon {
+  width: 24px;
+  height: 24px;
 }
 
-.status-bell-icon {
-  width: 40px;
-  height: 40px;
+.nav-spacer {
+  flex: 1;
+}
+
+/* Drawer Menu */
+.drawer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+}
+
+.drawer {
+  width: 280px;
+  background: white;
+  height: 100vh;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-header {
+  background: #dc2626;
   color: white;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.status-label {
-  background-color: #bbf7d0;
-  color: #166534;
-  font-size: 18px;
+.drawer-header h2 {
+  margin: 0;
+  font-size: 20px;
   font-weight: 700;
-  padding: 8px 24px;
-  border-radius: 6px;
-  letter-spacing: 1px;
 }
 
-.time-section {
-  text-align: center;
+.close-btn {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+}
+
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0;
+}
+
+.drawer-link {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  color: #374151;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.drawer-link:hover {
+  background: #f3f4f6;
+}
+
+.drawer-icon {
+  width: 20px;
+  height: 20px;
+  color: #6b7280;
+}
+
+/* Drawer Animation */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity 0.3s;
+}
+
+.drawer-enter-active .drawer,
+.drawer-leave-active .drawer {
+  transition: transform 0.3s;
+}
+
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+}
+
+.drawer-enter-from .drawer,
+.drawer-leave-to .drawer {
+  transform: translateX(-100%);
+}
+
+.main-content {
+  padding: 84px 20px 24px 20px;
+  flex: 1;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
   margin-bottom: 24px;
 }
 
-.current-time {
-  font-size: 48px;
-  font-weight: 300;
+.stat-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+.stat-card.safe {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+}
+
+.stat-card.alert {
+  background: linear-gradient(135deg, #fee2e2 0%, #fca5a5 100%);
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
   color: #111827;
   margin-bottom: 4px;
 }
 
-.current-date {
-  font-size: 16px;
+.stat-label {
+  font-size: 12px;
   color: #6b7280;
-  font-weight: 500;
+  font-weight: 600;
 }
 
-.location-section {
+.button-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.add-device-btn {
+  flex: 1;
+  padding: 14px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 40px;
+  transition: background 0.2s;
 }
 
-.location-icon {
+.add-device-btn:hover {
+  background: #b91c1c;
+}
+
+.add-device-btn .icon {
   width: 20px;
   height: 20px;
-  color: #374151;
 }
 
-.location-text {
-  font-size: 16px;
-  color: #374151;
-  font-weight: 500;
-}
-
-/* ========== NEW: SENSOR INDICATORS ========= */
-.sensor-section {
-  margin: 32px 0;
-  padding: 16px;
-  background-color: #f3f4f6;
+.debug-btn {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  background: #6b7280;
+  color: white;
+  border: none;
   border-radius: 12px;
-  border: 1px solid #e5e7eb;
+  font-size: 24px;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
 }
 
-.sensor-item {
-  margin-bottom: 16px;
+.debug-btn:hover {
+  background: #4b5563;
 }
 
-.sensor-item label {
-  display: block;
-  font-size: 14px;
+.devices-section {
+  margin-top: 16px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #374151;
+  margin: 0 0 16px 0;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: #9ca3af;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  color: #d1d5db;
+  margin: 0 auto 16px;
+}
+
+.empty-state p {
+  font-size: 16px;
   color: #6b7280;
-  font-weight: 600;
-  margin-bottom: 6px;
+  margin: 0 0 20px 0;
 }
 
-.smoke-bar-container {
+.btn-primary-small {
+  padding: 10px 20px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.device-list {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
 }
 
-.smoke-bar {
-  flex-grow: 1;
-  height: 12px;
-  background-color: #e0e0e0;
-  border-radius: 6px;
-  overflow: hidden;
-  transition: width 0.3s ease;
-}
-
-.smoke-bar.smoke-warning {
-  background-color: #eab308; /* Amber */
-}
-
-.smoke-bar.smoke-alert {
-  background-color: #dc2626; /* Red */
-}
-
-.smoke-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
-  min-width: 40px;
-  text-align: right;
-}
-
-.gas-status {
-  font-size: 16px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
-.gas-status.gas-high {
-  background-color: #fef3c7;
-  color: #92400e;
-}
-
-/* ========== HISTORY SECTION ========= */
-.history-section {
-  margin-top: 32px;
-}
-
-.history-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #374151;
-  margin: 0 0 20px 0;
-  letter-spacing: 0.5px;
-}
-
-.history-list {
+.device-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.history-item {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px;
-  background-color: white;
-  border-radius: 10px;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
-.history-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.device-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transform: translateY(-2px);
 }
 
-.history-icon {
-  width: 24px;
-  height: 24px;
+.device-icon {
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -510,113 +581,64 @@ const smokePercentage = computed(() => {
   flex-shrink: 0;
 }
 
-.history-icon.safe {
-  background-color: #22c55e;
+.device-icon.safe {
+  background: #dcfce7;
 }
 
-.history-icon.alert {
-  background-color: #eab308;
+.device-icon.alert {
+  background: #fee2e2;
 }
 
-.icon {
-  width: 14px;
-  height: 14px;
-  color: white;
+.device-icon .icon {
+  width: 24px;
+  height: 24px;
+  color: #374151;
 }
 
-.history-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.device-info {
+  flex: 1;
 }
 
-.history-status {
+.device-name {
   font-size: 16px;
   font-weight: 600;
   color: #111827;
-}
-
-.history-time {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.history-temperature {
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.history-extra {
-  font-size: 13px;
-  color: #6b7280;
-  margin-top: 6px;
-  padding-left: 36px;
-}
-
-.view-full-history {
-  text-align: center;
-  margin-top: 24px;
-}
-
-.history-link {
-  color: #374151;
-  text-decoration: underline;
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.history-link:hover {
-  color: #111827;
-}
-
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 400px;
-  background: white;
-  border-top: 1px solid #e5e7eb;
-  display: flex;
-  justify-content: space-around;
-  padding: 8px 0;
-}
-
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.nav-item.active .nav-icon {
-  color: #dc2626;
-}
-
-.nav-item.active .nav-label {
-  color: #dc2626;
-}
-
-.nav-icon {
-  width: 24px;
-  height: 24px;
-  color: #9ca3af;
   margin-bottom: 4px;
 }
 
-.nav-label {
+.device-location {
+  font-size: 13px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.loc-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.device-status {
   font-size: 12px;
   color: #9ca3af;
 }
 
-.nav-item:hover .nav-icon,
-.nav-item:hover .nav-label {
-  color: #6b7280;
+.device-status-badge {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.device-status-badge.safe {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.device-status-badge.alert {
+  background: #fee2e2;
+  color: #991b1b;
 }
 </style>
