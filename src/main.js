@@ -16,24 +16,43 @@ const app = createApp(App)
 app.component('LucideHome', Home)
 app.component('LucideUser', User)
 
-// Handle redirect result from Google Sign-In
-getRedirectResult(auth)
-  .then((result) => {
-    if (result) {
-      console.log('✅ User signed in:', result.user.email)
-      // Redirect to home after successful login
-      router.push('/')
-    }
-  })
-  .catch((error) => {
-    console.error('❌ Redirect sign-in error:', error)
-  })
+// Mount app first
+let appMounted = false
 
 // Wait until Firebase resolves auth state before mounting
-let appMounted = false
-onAuthStateChanged(auth, () => {
+onAuthStateChanged(auth, (user) => {
+  console.log('🔐 Auth state changed:', user ? user.email : 'No user');
+  
   if (!appMounted) {
+    console.log('📱 Mounting app...');
     app.use(router).mount('#app')
     appMounted = true
+    
+    // Handle redirect result after app is mounted
+    console.log('🔄 Checking for redirect result...');
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result && result.user) {
+          console.log('✅ User signed in via redirect:', result.user.email)
+          // Navigate to home after successful login
+          setTimeout(() => {
+            console.log('🏠 Navigating to home...');
+            router.push('/').catch(err => console.log('Navigation error:', err))
+          }, 100)
+        } else {
+          console.log('ℹ️ No redirect result (normal page load)');
+        }
+      })
+      .catch((error) => {
+        console.error('❌ Redirect sign-in error:', error)
+        alert('Sign-in failed: ' + error.message)
+      })
+  } else if (user) {
+    // User is already signed in, redirect to home if on login page
+    console.log('👤 User already signed in, checking route...');
+    if (router.currentRoute.value.path === '/login') {
+      console.log('↪️ Redirecting from login to home...');
+      router.push('/')
+    }
   }
 })

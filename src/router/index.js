@@ -9,6 +9,7 @@ import showMap  from "@/components/showMap.vue";
 import Notification from "@/views/Notifications.vue";
 
 import { auth } from "@/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 
 const routes = [
   { path: "/", name: "home", component: Home, meta: { requiresAuth: true } },
@@ -27,11 +28,40 @@ const router = createRouter({
   routes,
 });
 
-router.beforeEach((to, from, next) => {
-  const user = auth.currentUser;
-  if (to.meta.requiresAuth && !user) {
-    next("/login");
+// Helper to get current auth user
+function getCurrentUser() {
+  return new Promise((resolve, reject) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      unsubscribe();
+      resolve(user);
+    }, reject);
+  });
+}
+
+router.beforeEach(async (to, from, next) => {
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
+  
+  if (requiresAuth) {
+    try {
+      const user = await getCurrentUser();
+      if (user) {
+        next();
+      } else {
+        next("/login");
+      }
+    } catch (error) {
+      console.error("Auth check error:", error);
+      next("/login");
+    }
   } else {
+    // If going to login but already authenticated, redirect to home
+    if (to.path === '/login') {
+      const user = auth.currentUser;
+      if (user) {
+        next('/');
+        return;
+      }
+    }
     next();
   }
 });

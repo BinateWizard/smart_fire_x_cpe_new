@@ -18,17 +18,22 @@
 </template>
 
 <script setup>
-import { signInWithRedirect } from "firebase/auth";
+import { signInWithPopup } from "firebase/auth";
 import { auth, provider } from "@/firebase";
+import { useRouter } from "vue-router";
+
+const router = useRouter();
 
 async function loginWithGoogle() {
   try {
-    // Use redirect instead of popup for better mobile/PWA support
-    await signInWithRedirect(auth, provider);
-    // User will be redirected away and back, no need to manually route
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
+    console.log("User:", user.email, user.displayName);
+
+    // Redirect to home page
+    router.push("/");
   } catch (error) {
     console.error("Login failed:", error.message);
-    alert("Login failed: " + error.message);
   }
 }
 </script>

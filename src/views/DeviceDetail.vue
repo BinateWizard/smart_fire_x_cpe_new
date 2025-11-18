@@ -1,4 +1,5 @@
 <template>
+  <div class="page-wrapper">
   <div class="app-container">
     <!-- Header with back button -->
     <div class="header">
@@ -25,9 +26,9 @@
       </div>
 
       <!-- Device Dashboard (when data available) -->
-      <div v-else>
+      <div v-else :key="deviceId">
       <!-- Status Circle -->
-      <div class="status-section" v-if="latest">
+      <div class="status-section" v-if="latest && typeof latest === 'object' && latest.status">
         <div class="status-circle" :class="{ 'alert-circle': latest.status === 'Alert' }">
           <div class="status-icon-container">
             <Bell class="status-bell-icon" />
@@ -114,42 +115,44 @@
                   <span v-if="entry.lastType === 'alarm'">🔥 Alarm Triggered</span>
                   <span v-else-if="entry.sensorError">⚠️ Sensor Error</span>
                   <span v-else-if="entry.gasStatus === 'detected' || entry.gasStatus === 'critical'">⚠️ Gas Detected</span>
-                  <span v-else>{{ entry.status }}</span>
+                  <span v-else>{{ (entry.status === 'Alert' || entry.status === 'Safe') ? entry.status : 'Safe' }}</span>
                 </div>
                 <div class="history-time">
                   {{ formatTime(entry.dateTime) }}, {{ formatDate(entry.dateTime) }}
                 </div>
               </div>
             </div>
-            <div class="history-temperature" v-if="entry.temperature !== undefined && !entry.sensorError">
-              {{ entry.temperature }}°C
-            </div>
-            <div class="history-temperature" v-else-if="entry.sensorError">
-              ⚠️ Error
-            </div>
-            <div class="history-temperature" v-else-if="entry.message === 'help requested' || entry.message === 'Sensor Error'">
-              🆘 Help
-            </div>
-            <div class="history-temperature" v-else-if="entry.message === 'alarm has been triggered'">
-              🔥 Alarm
-            </div>
-            <div class="history-temperature" v-else>
-              N/A
-            </div>
-
-            <!-- Show Smoke & Gas in History -->
-            <div class="history-extra" v-if="entry.smokeAnalog !== undefined || entry.gasStatus">
-              <span v-if="entry.smokeAnalog">Smoke: {{ getSmokeLevel(entry.smokeAnalog) }}%</span>
-              <span v-if="entry.gasStatus && entry.gasStatus !== 'normal'" style="color: #eab308; margin-left: 8px;">
-                ⚡ Gas: {{ entry.gasStatus === 'detected' || entry.gasStatus === 'critical' ? 'Detected' : entry.gasStatus }}
-              </span>
-            </div>
+              <!-- Metrics as labeled badges for clarity -->
+              <div class="history-metrics">
+                <span 
+                  v-if="entry.smokeAnalog !== undefined && !entry.sensorError"
+                  class="badge"
+                  :class="getSmokeBadgeClass(getSmokeLevel(entry.smokeAnalog))">
+                  Smoke: {{ getSmokeLevel(entry.smokeAnalog) }}%
+                </span>
+                <span v-if="entry.temperature !== undefined && !entry.sensorError" class="badge temp">
+                  Temp: {{ entry.temperature }}°C
+                </span>
+                <span v-if="entry.humidity !== undefined && !entry.sensorError" class="badge humidity">
+                  Humidity: {{ entry.humidity }}%
+                </span>
+                <span v-if="entry.gasStatus && entry.gasStatus !== 'normal'" class="badge gas-alert">
+                  Gas: Detected
+                </span>
+                <span v-else-if="entry.gasStatus" class="badge gas-normal">
+                  Gas: Normal
+                </span>
+                <span v-if="entry.sensorError" class="badge error">Sensor Error</span>
+                <span v-if="entry.message === 'help requested'" class="badge help">Help Requested</span>
+                <span v-if="entry.message === 'alarm has been triggered'" class="badge alarm">Alarm</span>
+              </div>
           </div>
         </div>
         <div v-else class="no-data">No history available for this device</div>
       </div>
       </div>
     </div>
+  </div>
   </div>
 </template>
 
@@ -184,6 +187,30 @@ function closeMap() {
   showMapModal.value = false;
 }
 
+// Defensive: remove any accidental JSON blobs rendered by extensions/old cache
+function scrubDebugJSON() {
+  try {
+    const root = document.querySelector('.app-container');
+    if (!root) return;
+    const suspiciousKeys = [ '"gasStatus"', '"lastSeen"', '"lastType"', '"sensorError"' ];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const toHide = new Set();
+    let n;
+    while ((n = walker.nextNode())) {
+      const t = n.textContent?.trim();
+      if (!t || t.length < 10) continue;
+      if (t.startsWith('{') && t.endsWith('}') && suspiciousKeys.every(k => t.includes(k))) {
+        if (n.parentElement) toHide.add(n.parentElement);
+      }
+    }
+    toHide.forEach(el => {
+      el.style.display = 'none';
+    });
+  } catch (_) {
+    /* no-op */
+  }
+}
+
 // Calculate smoke percentage from analog value (0–4095 → 0–100%)
 function getSmokePercentage(analogValue) {
   const max = 4095;
@@ -200,6 +227,12 @@ function getSmokeColor(percentage) {
   if (percentage > 80) return '#dc2626';
   if (percentage > 60) return '#eab308';
   return '#22c55e';
+}
+
+function getSmokeBadgeClass(percentage) {
+  if (percentage > 80) return 'smoke-high';
+  if (percentage > 60) return 'smoke-med';
+  return 'smoke-low';
 }
 
 async function fetchDeviceInfo() {
@@ -253,6 +286,8 @@ async function fetchData() {
         latest.value = currentData;
         loading.value = false;
         noData.value = false;
+        // Clean up any stray JSON blobs possibly injected by cache/extensions
+        scrubDebugJSON();
         
         // Build history from readings if available
         if (data.readings && typeof data.readings === 'object') {
@@ -276,6 +311,7 @@ async function fetchData() {
           // If no history, just show current reading
           history.value = [currentData];
         }
+        scrubDebugJSON();
         
         lastUpdated.value = new Date();
         console.log("✅ Device data updated at:", lastUpdated.value.toLocaleTimeString());
@@ -297,18 +333,35 @@ async function fetchData() {
 }
 
 function determineStatus(data) {
-  if (data.sensorError) {
-    return "Alert"; // Sensor error is an alert condition
+  if (!data || typeof data !== 'object') return 'Safe';
+
+  const toStr = (v) => String(v || '').toLowerCase();
+
+  // Hard alert conditions
+  if (data.sensorError === true) return 'Alert';
+  if (data.message === 'help requested' || data.message === 'alarm has been triggered') return 'Alert';
+  if (data.lastType === 'alarm') return 'Alert';
+  if (['critical','detected','high'].includes(toStr(data.gasStatus))) return 'Alert';
+
+  // If status is a string, normalize only if it's a known label
+  if (typeof data.status === 'string') {
+    const s = toStr(data.status).trim();
+    if (s === 'alert' || s === 'unsafe') return 'Alert';
+    if (s === 'safe' || s === 'normal') return 'Safe';
+    // If it's JSON-like, try to parse and re-evaluate
+    if (s.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(data.status);
+        return determineStatus(parsed);
+      } catch (_) { /* ignore */ }
+    }
   }
-  if (data.message === "help requested" || data.message === "alarm has been triggered") {
-    return "Alert";
-  } else if (data.smokeLevel !== undefined || data.smoke !== undefined || data.smokeAnalog !== undefined) {
-    const smokeValue = data.smokeLevel || data.smoke || data.smokeAnalog || 0;
-    return smokeValue > 1500 ? "Alert" : "Safe";
-  } else if (data.status) {
-    return data.status;
-  }
-  return "Safe";
+
+  // Smoke threshold check
+  const smokeValue = data.smokeLevel ?? data.smoke ?? data.smokeAnalog ?? 0;
+  if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert';
+
+  return 'Safe';
 }
 
 onMounted(() => {
@@ -340,6 +393,23 @@ const smokePercentage = computed(() => {
 </script>
 
 <style scoped>
+/* Defensive: Hide any accidental debug output */
+pre, code {
+  display: none !important;
+}
+
+.page-wrapper {
+  width: 100%;
+  min-height: 100vh;
+  background-color: #fffaf0;
+  position: relative;
+  overflow: hidden;
+}
+
+.page-wrapper * {
+  box-sizing: border-box;
+}
+
 .app-container {
   max-width: 400px;
   margin: 0 auto;
@@ -348,6 +418,9 @@ const smokePercentage = computed(() => {
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+  position: relative;
+  z-index: 1;
 }
 
 .header {

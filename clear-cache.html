@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear FireTap Cache</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            background: #dc2626;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background: #b91c1c;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .status.show {
+            display: block;
+        }
+        .success {
+            background: #dcfce7;
+            color: #166534;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Clear FireTap Cache</h1>
+    <p>If you're seeing old cached data or JSON output, click below to clear everything.</p>
+    
+    <button onclick="clearEverything()">Clear All Cache & Reload</button>
+    <button onclick="unregisterServiceWorker()">Unregister Service Worker</button>
+    
+    <div id="status" class="status"></div>
+
+    <script>
+        async function clearEverything() {
+            const status = document.getElementById('status');
+            status.textContent = 'Clearing...';
+            status.className = 'status show';
+
+            // Clear localStorage
+            localStorage.clear();
+            
+            // Clear sessionStorage
+            sessionStorage.clear();
+            
+            // Clear all caches
+            if ('caches' in window) {
+                const cacheNames = await caches.keys();
+                await Promise.all(cacheNames.map(name => caches.delete(name)));
+            }
+            
+            // Unregister service workers
+            if ('serviceWorker' in navigator) {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(reg => reg.unregister()));
+            }
+            
+            status.textContent = '✅ All cache cleared! Reloading...';
+            status.className = 'status show success';
+            
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1000);
+        }
+
+        async function unregisterServiceWorker() {
+            const status = document.getElementById('status');
+            
+            if ('serviceWorker' in navigator) {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(reg => reg.unregister()));
+                
+                status.textContent = '✅ Service Worker unregistered! Reload the page.';
+                status.className = 'status show success';
+            } else {
+                status.textContent = '❌ Service Workers not supported';
+                status.className = 'status show';
+            }
+        }
+    </script>
+</body>
+</html>
