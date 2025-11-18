@@ -30,7 +30,7 @@
               type="text" 
               id="deviceName" 
               v-model="formData.name" 
-              placeholder="e.g., Kitchen Sensor"
+              placeholder="e.g., Public Market Device"
               required
             />
           </div>
