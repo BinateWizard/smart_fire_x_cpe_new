@@ -125,8 +125,10 @@
           'alert-circle': latest.status === 'Alert' && !hasFireCondition && !hasSprinklerActive
         }">
           <div class="status-icon-container">
-            <!-- Fire detected: Flame icon (smoke > threshold, gas detected, or alert button) -->
-            <Flame v-if="hasFireCondition" class="status-bell-icon" />
+            <!-- High temperature or fire detected -->
+            <Flame v-if="hasHighTempCondition" class="status-bell-icon" />
+            <!-- Fire detected from other causes (smoke/gas/alarm/button) -->
+            <Flame v-else-if="hasFireCondition" class="status-bell-icon" />
             <!-- Sprinkler active (6s button): Droplets icon -->
             <Droplets v-else-if="hasSprinklerActive" class="status-bell-icon" />
             <!-- Safe: Check icon -->
@@ -142,6 +144,7 @@
           'alert-label': latest.status === 'Alert' && !hasFireCondition && !hasSprinklerActive
         }">
           <span v-if="hasSprinklerActive">Sprinkler Active</span>
+          <span v-else-if="hasHighTempCondition">High Temperature</span>
           <span v-else-if="hasFireCondition">Fire Detected</span>
           <span v-else>{{ latest.status || 'Safe' }}</span>
         </div>
@@ -153,6 +156,7 @@
         <span v-if="latest.buttonEvent === 'STATE_ALERT'">Emergency alert activated via button (3s hold).</span>
         <span v-else-if="latest.gasStatus === 'detected' || latest.gasStatus === 'critical'">Critical gas levels detected.</span>
         <span v-else-if="latest.lastType === 'alarm'">Alarm has been triggered by sensors.</span>
+        <span v-else-if="hasHighTempCondition">High temperature detected. Fire risk is elevated.</span>
         <span v-else>High smoke levels detected.</span>
         Press button for ≤1s to reset or activate sprinkler (6s hold).
         <div class="respond-actions">
@@ -623,7 +627,13 @@ const filteredHistory = computed(() => {
   return history.value.filter(h => h.dateTime >= cutoffDate);
 });
 
-// Fire condition: high smoke, gas detected, alarm triggered, or alert button pressed
+// High temperature condition helper
+const hasHighTempCondition = computed(() => {
+  if (!latest.value) return false;
+  return typeof latest.value.temperature === 'number' && latest.value.temperature >= 30;
+});
+
+// Fire condition: high smoke, gas detected, alarm triggered, button alert, or high temperature
 const hasFireCondition = computed(() => {
   if (!latest.value) return false;
   
@@ -633,6 +643,9 @@ const hasFireCondition = computed(() => {
   // Check for high smoke levels (>1500 or >60%)
   const smokeValue = latest.value.smokeLevel ?? latest.value.smoke ?? latest.value.smokeAnalog ?? 0;
   if (typeof smokeValue === 'number' && smokeValue > 1500) return true;
+  
+  // Check for high temperature (>= 30°C)
+  if (hasHighTempCondition.value) return true;
   
   // Check for gas detection
   const gasStatus = String(latest.value.gasStatus || '').toLowerCase();
@@ -945,14 +958,32 @@ async function fetchData() {
           isButtonSprinkler = true;
         }
         
+        // Resolve current temperature and humidity, preferring DHT node when present
+        const dhtNode = data.dht || {};
+        let currentTemp = data.temperature;
+        let currentHumidity = data.humidity;
+
+        if (currentTemp === undefined && dhtNode.temperature !== undefined) {
+          currentTemp = dhtNode.temperature;
+        }
+        if (currentHumidity === undefined && dhtNode.humidity !== undefined) {
+          currentHumidity = dhtNode.humidity;
+        }
+
         // Process current/latest data
         const currentData = {
           id: Date.now(),
-          dateTime: lastEventAt ? new Date(lastEventAt) : (data.lastSeen ? new Date(data.lastSeen) : (data.timestamp ? new Date(data.timestamp) : new Date())),
+          dateTime: lastEventAt
+            ? new Date(lastEventAt)
+            : (data.lastSeen
+              ? new Date(data.lastSeen)
+              : (dhtNode.timestamp
+                ? new Date(dhtNode.timestamp)
+                : (data.timestamp ? new Date(data.timestamp) : new Date()))),
           smokeAnalog: data.smokeLevel || data.smoke || data.smokeAnalog || 0,
           gasStatus: data.gasStatus || 'normal',
-          temperature: data.temperature,
-          humidity: data.humidity,
+          temperature: currentTemp,
+          humidity: currentHumidity,
           message: buttonMessage || data.message || (sensorErrorFlag ? 'Sensor Error' : ''),
           sensorError: sensorErrorFlag,
           sprinklerActive: isButtonSprinkler || sprinklerActiveFlag,
