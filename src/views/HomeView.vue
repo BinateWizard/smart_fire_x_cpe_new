@@ -27,7 +27,7 @@
           </div>
           <nav class="drawer-nav">
             <a @click="navigateTo('/')" class="drawer-link">
-              <Bell class="drawer-icon" /> Devices
+              <Flame class="drawer-icon" /> Devices
             </a>
             <a @click="navigateTo('/notifications')" class="drawer-link">
               <Bell class="drawer-icon" /> Notifications
@@ -42,6 +42,94 @@
               <Settings class="drawer-icon" /> Settings
             </a>
           </nav>
+          
+          <!-- Account Footer -->
+          <div class="drawer-footer">
+            <button @click="showAccountModal = true" class="account-btn">
+              <div class="account-avatar">
+                <User class="avatar-icon" />
+              </div>
+              <div class="account-info">
+                <div class="account-email">{{ userEmail }}</div>
+                <div class="account-status">View Account</div>
+              </div>
+            </button>
+            <button @click="handleSignOut" class="signout-btn" title="Sign Out">
+              <LogOut class="signout-icon" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Account Modal -->
+    <transition name="modal">
+      <div v-if="showAccountModal" class="modal-overlay" @click="showAccountModal = false">
+        <div class="modal account-modal" @click.stop>
+          <div class="modal-header">
+            <h2>Account Details</h2>
+            <button @click="showAccountModal = false" class="modal-close">×</button>
+          </div>
+          
+          <div class="modal-body">
+            <!-- User Info Section -->
+            <section class="account-section">
+              <h3>User Information</h3>
+              <div class="info-grid">
+                <div class="info-item">
+                  <span class="info-label">Email:</span>
+                  <span class="info-value">{{ userEmail }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">User ID:</span>
+                  <span class="info-value">{{ userId }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Account Created:</span>
+                  <span class="info-value">{{ accountCreated }}</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- BFP Response Stats -->
+            <section class="account-section stats-section">
+              <h3>BFP Response Statistics</h3>
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <div class="stat-icon">🔥</div>
+                  <div class="stat-value">{{ totalIncidents }}</div>
+                  <div class="stat-label">Total Incidents</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-icon">✅</div>
+                  <div class="stat-value">{{ responsesMade }}</div>
+                  <div class="stat-label">Responses Made</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-icon">⏱️</div>
+                  <div class="stat-value">{{ avgResponseTime }}</div>
+                  <div class="stat-label">Avg Response Time</div>
+                </div>
+              </div>
+              
+              <button @click="printReport" class="print-btn">
+                <Printer class="btn-icon" />
+                Print Incident Report
+              </button>
+            </section>
+
+            <!-- Danger Zone -->
+            <section class="account-section danger-section">
+              <h3>Danger Zone</h3>
+              <div class="danger-content">
+                <p>Request your account to be permanently deleted. This action cannot be undone.</p>
+                <button @click="requestAccountDeletion" class="danger-btn">
+                  <AlertTriangle class="btn-icon" />
+                  Request Account Deletion
+                </button>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </transition>
@@ -248,7 +336,7 @@ import { useRouter } from "vue-router";
 import { collection, query, getDocs, where, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { ref as dbRef, onValue, get } from "firebase/database";
 import { db, rtdb, auth } from "@/firebase";
-import { Bell, MapPin, Plus, Inbox, Menu, X, Settings, HelpCircle, Info } from 'lucide-vue-next';
+import { Bell, MapPin, Plus, Inbox, Menu, X, Settings, HelpCircle, Info, Flame, User, LogOut, Printer, AlertTriangle } from 'lucide-vue-next';
 import LocationPicker from '@/components/LocationPicker.vue';
 
 const router = useRouter();
@@ -258,6 +346,36 @@ const loading = ref(true);
 const menuOpen = ref(false);
 const showAddModal = ref(false);
 const showDeviceIdHelp = ref(false);
+const showAccountModal = ref(false);
+const showLocationPicker = ref(false);
+
+// User account info
+const userEmail = computed(() => auth.currentUser?.email || 'Unknown');
+const userId = computed(() => auth.currentUser?.uid || '');
+const accountCreated = computed(() => {
+  const createdAt = auth.currentUser?.metadata?.creationTime;
+  return createdAt ? new Date(createdAt).toLocaleDateString() : 'Unknown';
+});
+
+// Mock BFP response statistics (replace with actual data from Firestore later)
+const totalIncidents = ref(0);
+const responsesMade = ref(0);
+const avgResponseTime = ref('--');
+
+function calculateResponseStats() {
+  // Count total alert incidents from devices
+  let incidents = 0;
+  devices.value.forEach(device => {
+    if (device.status === 'Alert') {
+      incidents++;
+    }
+  });
+  
+  // Mock data for now
+  totalIncidents.value = incidents;
+  responsesMade.value = Math.floor(incidents * 0.8); // 80% response rate mock
+  avgResponseTime.value = incidents > 0 ? '8 min' : '--';
+}
 
 function handleLocationConfirm(location) {
   console.log('📍 Location confirmed:', location);
@@ -280,7 +398,6 @@ const addError = ref('');
 const addSuccess = ref(false);
 const showErrorModal = ref(false);
 const errorModalMessage = ref('');
-const showLocationPicker = ref(false);
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
@@ -289,6 +406,37 @@ function toggleMenu() {
 function navigateTo(path) {
   menuOpen.value = false;
   router.push(path);
+}
+
+function handleSignOut() {
+  if (confirm('Are you sure you want to sign out?')) {
+    auth.signOut().then(() => {
+      router.push('/login');
+    });
+  }
+}
+
+function printReport() {
+  alert('📄 Printing Incident Report (Mock)\n\n' +
+    `Total Incidents: ${totalIncidents.value}\n` +
+    `Responses Made: ${responsesMade.value}\n` +
+    `Average Response Time: ${avgResponseTime.value}\n\n` +
+    'This will generate a detailed PDF report in the production version.');
+}
+
+function requestAccountDeletion() {
+  const confirmation = prompt(
+    'Are you sure you want to request account deletion?\n\n' +
+    'Type "DELETE" to confirm this irreversible action:'
+  );
+  
+  if (confirmation === 'DELETE') {
+    alert('🚨 Account deletion request submitted.\n\n' +
+      'Your request has been sent to the administrator. ' +
+      'You will receive an email confirmation within 24-48 hours.\n\n' +
+      '(This is a mock - implement actual deletion workflow in production)');
+    showAccountModal.value = false;
+  }
 }
 
 function goToNotifications() {
@@ -372,6 +520,9 @@ async function fetchDevices() {
     });
 
     console.log("✅ Devices loaded:", devices.value.length);
+    
+    // Calculate response stats after loading devices
+    calculateResponseStats();
   } catch (error) {
     console.error("❌ Error fetching devices:", error);
   } finally {
@@ -533,6 +684,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  position: relative;
 }
 
 /* Fixed Top Navigation */
@@ -600,15 +752,17 @@ onMounted(() => {
 }
 
 .drawer {
-  width: 280px;
+  width: 300px;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   height: 100vh;
+  max-height: 100vh;
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   border-right: 1px solid rgba(255, 255, 255, 0.3);
+  overflow: hidden;
 }
 
 .drawer-header {
@@ -639,6 +793,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   padding: 12px 0;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .drawer-link {
@@ -662,6 +818,298 @@ onMounted(() => {
   width: 20px;
   height: 20px;
   color: #6b7280;
+}
+
+/* Drawer Footer */
+.drawer-footer {
+  margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  background: white;
+}
+
+.account-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 0;
+}
+
+.account-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar-icon {
+  width: 18px;
+  height: 18px;
+  color: white;
+}
+
+.account-info {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+}
+
+.account-email {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-status {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.signout-btn {
+  width: 36px;
+  height: 36px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.signout-btn:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+.signout-icon {
+  width: 16px;
+  height: 16px;
+  color: #dc2626;
+}
+
+/* Account Modal */
+.account-modal {
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.account-modal .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #dc2626;
+  color: white;
+  padding: 16px 20px;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.account-modal .modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.account-modal .modal-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.account-section {
+  padding: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.account-section:last-child {
+  border-bottom: none;
+}
+
+.account-section h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.info-label {
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  color: #111827;
+  font-size: 14px;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.stats-section {
+  background: linear-gradient(to bottom, #ffffff, #fef2f2);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.stat-icon {
+  font-size: 28px;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.3;
+}
+
+.print-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.print-btn:hover {
+  background: #2563eb;
+}
+
+.btn-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.danger-section {
+  background: #fef2f2;
+}
+
+.danger-content p {
+  margin: 0 0 16px 0;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.danger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: white;
+  color: #dc2626;
+  border: 2px solid #dc2626;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.danger-btn:hover {
+  background: #dc2626;
+  color: white;
 }
 
 /* Drawer Animation */
@@ -930,6 +1378,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
 }
 
 .modal-container {
