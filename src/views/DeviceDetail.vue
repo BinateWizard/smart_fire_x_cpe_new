@@ -27,6 +27,13 @@
       </button>
       <button 
         class="tab-btn" 
+        :class="{ active: activeTab === 'logs' }"
+        @click="activeTab = 'logs'"
+      >
+        Logs
+      </button>
+      <button 
+        class="tab-btn" 
         :class="{ active: activeTab === 'info' }"
         @click="activeTab = 'info'"
       >
@@ -122,12 +129,21 @@
 
       <!-- OVERVIEW TAB -->
       <div v-if="activeTab === 'overview'">
+      <div
+        style="background:#ffffff;border-radius:16px;padding:16px 16px 20px;box-shadow:0 6px 18px rgba(15,23,42,0.06);margin-bottom:16px;"
+      >
       <!-- Status Circle -->
       <div class="status-section" v-if="latest">
         <div class="status-circle" :class="{
+          // Safe: no fire, no sprinkler, no smoke
           'safe-circle': !hasFireCondition && !hasSprinklerActive && !hasSmokeCondition && !hasRecentSmokeAlert && latest.status === 'Safe',
-          'help-circle': hasRecentSmokeAlert && !hasNonSmokeFireCondition && !hasSprinklerActive,
+          // Smoke-only condition
+          'smoke-circle': hasRecentSmokeAlert && !hasNonSmokeFireCondition && !hasSprinklerActive,
+          // Sprinkler active
           'sprinkler-circle': hasSprinklerActive,
+          // High temperature (non-sprinkler, non-fire)
+          'temp-circle': hasHighTempCondition && !hasNonSmokeFireCondition && !hasSprinklerActive,
+          // Fire condition (non-smoke fire)
           'alert-circle': hasNonSmokeFireCondition && !hasSprinklerActive
         }">
           <div class="status-icon-container">
@@ -144,9 +160,10 @@
           </div>
         </div>
         <div class="status-label" :class="{
-          'safe-label': !hasFireCondition && !hasSprinklerActive && !hasSmokeCondition && !hasRecentSmokeAlert && latest.status === 'Safe',
+          'safe-label': !hasFireCondition && !hasSprinklerActive && !hasSmokeCondition && !hasRecentSmokeAlert && !hasHighTempCondition && latest.status === 'Safe',
           'help-label': hasRecentSmokeAlert && !hasNonSmokeFireCondition && !hasSprinklerActive,
           'sprinkler-label': hasSprinklerActive,
+          'temp-label': hasHighTempCondition && !hasNonSmokeFireCondition && !hasSprinklerActive,
           'alert-label': hasNonSmokeFireCondition && !hasSprinklerActive
         }">
           <span v-if="hasSprinklerActive">Sprinkler Active</span>
@@ -168,7 +185,16 @@
         </div>
       </div>
 
-      <!-- Fire Alert (gas/high temp/alarm/button, excluding smoke-only) -->
+      <!-- High Temperature Alert (orange warning) -->
+      <div v-if="hasHighTempCondition && !hasNonSmokeFireCondition && !hasSprinklerActive" class="temp-warning-banner">
+        🌡️ <strong>High Temperature Warning!</strong><br>
+        Temperature is elevated at {{ latest.temperature }}°C. Monitor the area closely.
+        <div class="respond-actions">
+          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+        </div>
+      </div>
+
+      <!-- Fire Alert (gas/alarm/button, excluding smoke-only and temp-only) -->
       <div v-if="hasNonSmokeFireCondition && !hasSprinklerActive" class="alert-banner">
         🔥 <strong>Fire Alert!</strong><br>
         <span v-if="latest.buttonEvent === 'STATE_ALERT'">Emergency alert activated via button (3s hold).</span>
@@ -217,28 +243,6 @@
         <MapPin class="location-icon" />
         <span class="location-text">{{ deviceLocation }}</span>
       </div>
-
-      <!-- Smoke & Gas Indicators -->
-      <div class="sensor-section" v-if="latest">
-        <div class="sensor-item">
-          <label>SMOKE LEVEL</label>
-          <div class="smoke-bar-container">
-            <div 
-              class="smoke-bar" 
-              :style="{ width: smokePercentage + '%', backgroundColor: getSmokeColor(smokePercentage) }"
-            ></div>
-            <span class="smoke-value">{{ smokePercentage }}%</span>
-          </div>
-        </div>
-
-        <div class="sensor-item">
-          <label>GAS STATUS</label>
-          <div class="gas-status" :class="{ 'gas-high': latest.gasStatus === 'detected' || latest.gasStatus === 'critical' || latest.gasStatus === 'high' }">
-            <span v-if="latest.gasStatus === 'detected' || latest.gasStatus === 'critical'">⚠️ DETECTED</span>
-            <span v-else-if="latest.gasStatus === 'high'">⚠️ HIGH</span>
-            <span v-else>✅ NORMAL</span>
-          </div>
-        </div>
       </div>
 
       <showMap v-if="showMapModal" @close="closeMap" />
@@ -248,28 +252,27 @@
         <h2 class="section-title">📊 CURRENT READINGS</h2>
         
         <div class="readings-grid">
-          <div class="reading-card">
-            <div class="reading-icon">🌡️</div>
-            <div class="reading-value">{{ (latest && latest.temperature !== undefined) ? latest.temperature + '°C' : 'No readings' }}</div>
-            <div class="reading-label">Temperature</div>
-          </div>
+          <div class="reading-row-two">
+            <div class="reading-card">
+              <div class="reading-icon">🌡️</div>
+              <div class="reading-value">{{ (latest && latest.temperature !== undefined) ? latest.temperature + '°C' : 'No readings' }}</div>
+              <div class="reading-label">Temperature</div>
+            </div>
 
-          <div class="reading-card">
-            <div class="reading-icon">💧</div>
-            <div class="reading-value">{{ (latest && latest.humidity !== undefined) ? latest.humidity + '%' : 'No readings' }}</div>
-            <div class="reading-label">Humidity</div>
+            <div class="reading-card">
+              <div class="reading-icon">💧</div>
+              <div class="reading-value">{{ (latest && latest.humidity !== undefined) ? latest.humidity + '%' : 'No readings' }}</div>
+              <div class="reading-label">Humidity</div>
+            </div>
           </div>
 
           <div class="reading-card">
             <div class="reading-icon">💨</div>
-            <div class="reading-value" :style="{ color: (latest && latest.smokeAnalog !== undefined) ? getSmokeColor(smokePercentage) : '#6b7280' }">{{ (latest && latest.smokeAnalog !== undefined) ? smokePercentage + '%' : 'No readings' }}</div>
-            <div class="reading-label">Smoke Level</div>
-          </div>
-
-          <div class="reading-card">
-            <div class="reading-icon">🔥</div>
-            <div class="reading-value" :class="latest && latest.gasStatus && latest.gasStatus !== 'normal' ? 'text-alert' : 'text-safe'">{{ (latest && latest.gasStatus !== undefined) ? (latest.gasStatus || 'normal') : 'No readings' }}</div>
-            <div class="reading-label">Gas Status</div>
+            <div class="reading-value">
+              <span v-if="hasSmokeCondition || hasRecentSmokeAlert">Smoke Detected</span>
+              <span v-else>No Smoke Detected</span>
+            </div>
+            <div class="reading-label">Smoke</div>
           </div>
         </div>
       </div>
@@ -450,62 +453,113 @@
       </div>
       <!-- END INFO TAB -->
 
-      <!-- Recent Status History -->
+      <!-- LOGS TAB -->
+      <div v-if="activeTab === 'logs'">
       <div class="history-section">
-        <h2 class="history-title">RECENT STATUS HISTORY</h2>
-        <div class="history-list" v-if="statusCards.length > 0">
+        <h2 class="history-title">📋 DEVICE DATA LOGS</h2>
+        <div class="logs-container" v-if="history.length > 0">
           <div 
-            v-for="entry in statusCards" 
+            v-for="entry in displayLogs" 
             :key="entry.id" 
-            class="history-item"
+            class="log-entry"
+            :class="{
+              'log-alert': entry.status === 'Alert' || entry.buttonEvent === 'STATE_ALERT',
+              'log-sprinkler': entry.sprinklerActive || entry.buttonEvent === 'STATE_SPRINKLER',
+              'log-smoke': entry.smokeDetected && entry.status !== 'Alert' && !entry.sprinklerActive,
+              'log-temp': entry.temperature >= 50 && entry.status !== 'Alert' && !entry.smokeDetected && !entry.sprinklerActive,
+              'log-safe': entry.status === 'Safe' && !entry.sprinklerActive && !entry.smokeDetected && entry.temperature < 50
+            }"
           >
-            <div class="history-left">
-              <div 
-                class="history-icon" 
-                :class="entry.status === 'Safe' ? 'safe' : 'alert'"
-              >
-                <component :is="entry.status === 'Safe' ? Check : AlertTriangle" class="icon" />
-              </div>
-              <div class="history-info">
-                <div class="history-status">
-                  <span v-if="entry.lastType === 'alarm'">🔥 Alarm Triggered</span>
-                  <span v-else-if="entry.sensorError">⚠️ Sensor Error</span>
-                  <span v-else-if="entry.gasStatus === 'detected' || entry.gasStatus === 'critical'">⚠️ Gas Detected</span>
-                  <span v-else>{{ (entry.status === 'Alert' || entry.status === 'Safe') ? entry.status : 'Safe' }}</span>
+            <!-- Simple Log Card - Only shows the main event -->
+            <div class="log-simple-content">
+              <!-- Alert Event -->
+              <div v-if="entry.buttonEvent === 'STATE_ALERT'" class="log-event">
+                <Flame class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">🔥 Fire Alert Triggered</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
                 </div>
-                <div class="history-time">
-                  {{ formatTime(entry.dateTime) }}, {{ formatDate(entry.dateTime) }}
+              </div>
+
+              <!-- Sprinkler Event -->
+              <div v-else-if="entry.sprinklerActive || entry.buttonEvent === 'STATE_SPRINKLER'" class="log-event">
+                <Droplets class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">💦 Sprinkler Activated</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
+                </div>
+              </div>
+
+              <!-- Smoke Detected Event -->
+              <div v-else-if="entry.smokeDetected" class="log-event">
+                <Cloud class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">💨 Smoke Detected</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
+                </div>
+              </div>
+
+              <!-- High Temperature Event -->
+              <div v-else-if="entry.temperature >= 50" class="log-event">
+                <Flame class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">🌡️ High Temperature ({{ entry.temperature }}°C)</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
+                </div>
+              </div>
+
+              <!-- Gas Detected Event -->
+              <div v-else-if="entry.gasStatus === 'detected' || entry.gasStatus === 'critical'" class="log-event">
+                <AlertTriangle class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">⚠️ Gas Detected</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
+                </div>
+              </div>
+
+              <!-- Sensor Error Event -->
+              <div v-else-if="entry.sensorError" class="log-event">
+                <AlertTriangle class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">⚠️ Sensor Error</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
+                </div>
+              </div>
+
+              <!-- Alarm Event -->
+              <div v-else-if="entry.lastType === 'alarm'" class="log-event">
+                <AlertTriangle class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">🚨 Alarm Triggered</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
+                </div>
+              </div>
+
+              <!-- Safe/Normal Status -->
+              <div v-else class="log-event">
+                <Check class="event-icon" />
+                <div class="event-details">
+                  <div class="event-title">✅ System Normal</div>
+                  <div class="event-time">{{ formatTime(entry.dateTime) }} • {{ formatDate(entry.dateTime) }}</div>
                 </div>
               </div>
             </div>
-              <!-- Metrics as labeled badges for clarity -->
-              <div class="history-metrics">
-                <span 
-                  v-if="entry.smokeAnalog !== undefined && !entry.sensorError"
-                  class="badge"
-                  :class="getSmokeBadgeClass(getSmokeLevel(entry.smokeAnalog))">
-                  Smoke: {{ getSmokeLevel(entry.smokeAnalog) }}%
-                </span>
-                <span v-if="entry.temperature !== undefined && !entry.sensorError" class="badge temp">
-                  Temp: {{ entry.temperature }}°C
-                </span>
-                <span v-if="entry.humidity !== undefined && !entry.sensorError" class="badge humidity">
-                  Humidity: {{ entry.humidity }}%
-                </span>
-                <span v-if="entry.gasStatus && entry.gasStatus !== 'normal'" class="badge gas-alert">
-                  Gas: Detected
-                </span>
-                <span v-else-if="entry.gasStatus" class="badge gas-normal">
-                  Gas: Normal
-                </span>
-                <span v-if="entry.sensorError" class="badge error">Sensor Error</span>
-                <span v-if="entry.message === 'help requested'" class="badge help">Help Requested</span>
-                <span v-if="entry.message === 'alarm has been triggered'" class="badge alarm">Alarm</span>
-              </div>
           </div>
         </div>
-        <div v-else class="no-data">No recent alerts for this device</div>
+        <div v-else class="no-data">No data logs available for this device</div>
+
+        <!-- Load More Button -->
+        <button 
+          v-if="history.length > displayLimit" 
+          class="load-more-btn" 
+          @click="loadMoreLogs"
+        >
+          {{ showAllLogs ? 'Show Less' : `Load More (${history.length - displayLimit} more)` }}
+        </button>
       </div>
+      </div>
+      <!-- END LOGS TAB -->
+
       </div>
     </div>
   </div>
@@ -519,7 +573,7 @@ import { ref, onMounted, onUnmounted, computed, nextTick, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useRouter } from "vue-router";
 import { doc, getDoc, deleteDoc } from "firebase/firestore";
-import { ref as dbRef, onValue, query, orderByChild, limitToLast, remove } from "firebase/database"; // retained for disconnect/delete only
+import { ref as dbRef, onValue, query, orderByChild, limitToLast, remove, set } from "firebase/database"; // retained for disconnect/delete only
 import { db, rtdb, auth } from "@/firebase";
 import { stopAllAlerts } from "@/services/alertMonitor";
 import { useDeviceController } from "@/services/deviceController";
@@ -530,7 +584,8 @@ import {
   AlertTriangle,
   ChevronLeft,
   Flame,
-  Droplets
+  Droplets,
+  Cloud
 } from 'lucide-vue-next'
 import {
   Chart,
@@ -571,6 +626,8 @@ const noData = ctrlNoData;
 const showMapModal = ref(false);
 const showOfflineModal = ref(false);
 const showInactivityModal = ref(false);
+const showAllLogs = ref(false);
+const displayLimit = ref(5);
 // replaced by controller refs above
 
 let inactivityTimeoutId = null;
@@ -653,7 +710,7 @@ const filteredHistory = computed(() => {
 // High temperature condition helper
 const hasHighTempCondition = computed(() => {
   if (!latest.value) return false;
-  return typeof latest.value.temperature === 'number' && latest.value.temperature >= 30;
+  return typeof latest.value.temperature === 'number' && latest.value.temperature >= 50;
 });
 
 // High smoke condition helper (direct reading: digital flag or high analog)
@@ -678,7 +735,7 @@ watch(hasSmokeCondition, (isSmoke) => {
     smokeAlertTimeoutId = setTimeout(() => {
       hasRecentSmokeAlert.value = false;
       smokeAlertTimeoutId = null;
-    }, 5000);
+    }, 10000);
   }
 });
 
@@ -687,14 +744,12 @@ watch(hasSmokeCondition, (isSmoke) => {
 const hasFireCondition = computed(() => hasNonSmokeFireCondition.value);
 
 // Fire condition excluding smoke-only (used for dedicated Fire Alert banner)
+// Note: High temperature alone is NOT a fire condition - only gas/alarm/button alerts
 const hasNonSmokeFireCondition = computed(() => {
   if (!latest.value) return false;
 
   // Button emergency alert is always fire
   if (latest.value.buttonEvent === 'STATE_ALERT') return true;
-
-  // High temperature without smoke-only condition
-  if (hasHighTempCondition.value && !hasRecentSmokeAlert.value && !hasSmokeCondition.value) return true;
 
   // Gas detection without smoke-only condition
   const gasStatus = String(latest.value.gasStatus || '').toLowerCase();
@@ -841,10 +896,40 @@ async function deleteDevice() {
 }
 
 async function handleRespond() {
+  console.log('🔵 handleRespond function called!');
+  console.log('🔵 deviceId:', deviceId.value);
+  
   try {
     // Stop all alert effects (sound + vibration)
     stopAllAlerts();
-  } catch (_) { /* no-op */ }
+    console.log('🔵 Alerts stopped');
+    
+    // Send buzzer beep command to ESP32 via RTDB
+    const commandPath = `devices/${deviceId.value}/command`;
+    console.log('📤 Sending command to Firebase RTDB path:', commandPath);
+    console.log('📤 Device ID:', deviceId.value);
+    
+    const buzzerCommandRef = dbRef(rtdb, commandPath);
+    const commandData = {
+      type: 'buzzer',
+      action: 'beep',
+      pattern: 'triple',
+      timestamp: Date.now()
+    };
+    
+    console.log('📤 Command data:', commandData);
+    
+    await set(buzzerCommandRef, commandData);
+    
+    console.log('✅ Buzzer command sent to ESP32 successfully');
+    console.log('✅ Full RTDB path:', commandPath);
+    alert('Command sent! Check ESP32 Serial Monitor.');
+  } catch (error) {
+    console.error('❌ Error sending buzzer command:', error);
+    console.error('❌ Error details:', error.message);
+    alert('Failed to send command: ' + error.message);
+  }
+  
   // Show the whole map view
   try {
     router.push('/map');
@@ -1168,6 +1253,20 @@ function renderCharts() {
 const smokePercentage = computed(() => {
   return latest.value ? getSmokePercentage(latest.value.smokeAnalog) : 0;
 });
+
+const displayLogs = computed(() => {
+  // Sort by most recent first
+  const sorted = [...history.value].sort((a, b) => b.dateTime - a.dateTime);
+  
+  if (showAllLogs.value) {
+    return sorted;
+  }
+  return sorted.slice(0, displayLimit.value);
+});
+
+function loadMoreLogs() {
+  showAllLogs.value = !showAllLogs.value;
+}
 </script>
 
 <style scoped>
@@ -1334,18 +1433,21 @@ pre, code {
   color: #991b1b;
   font-size: 14px;
   line-height: 1.6;
+  animation: pulse-red 2.2s ease-in-out infinite;
 }
 
 .alert-banner {
-  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
-  border: 2px solid #f97316;
+  /* Fire-related alerts: red */
+  background: linear-gradient(135deg, #fee2e2 0%, #fca5a5 100%);
+  border: 2px solid #ef4444;
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 20px;
   text-align: center;
-  color: #7c2d12;
+  color: #7f1d1d;
   font-size: 14px;
   line-height: 1.6;
+  animation: pulse-red 2.2s ease-in-out infinite;
 }
 
 .warning-banner {
@@ -1358,6 +1460,26 @@ pre, code {
   color: #713f12;
   font-size: 14px;
   line-height: 1.6;
+  animation: pulse-yellow 2.4s ease-in-out infinite;
+}
+
+.temp-warning-banner {
+  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+  border: 2px solid #f97316;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  text-align: center;
+  color: #7c2d12;
+  font-size: 14px;
+  line-height: 1.6;
+  animation: pulse-orange 2.2s ease-in-out infinite;
+}
+
+.temp-warning-banner strong {
+  font-size: 16px;
+  display: block;
+  margin-bottom: 4px;
 }
 
 .sprinkler-banner {
@@ -1385,6 +1507,42 @@ pre, code {
   }
   50% {
     box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+}
+
+@keyframes pulse-green {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+  }
+}
+
+@keyframes pulse-yellow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(234, 179, 8, 0);
+  }
+}
+
+@keyframes pulse-orange {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(249, 115, 22, 0);
+  }
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
   }
 }
 
@@ -1416,19 +1574,31 @@ pre, code {
 
 .status-circle.safe-circle {
   background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  animation: pulse-green 2.4s ease-in-out infinite;
 }
 
-.status-circle.help-circle {
-  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+.status-circle.smoke-circle {
+  /* Smoke: yellow */
+  background: linear-gradient(135deg, #fef9c3 0%, #facc15 100%);
+  animation: pulse-yellow 2.6s ease-in-out infinite;
 }
 
 .status-circle.sprinkler-circle {
+  /* Sprinkler: blue */
   background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
   animation: pulse-blue 2s ease-in-out infinite;
 }
 
+.status-circle.temp-circle {
+  /* High temperature: orange */
+  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+  animation: pulse-orange 2.2s ease-in-out infinite;
+}
+
 .status-circle.alert-circle {
+  /* Fire: red */
   background: linear-gradient(135deg, #fee2e2 0%, #fca5a5 100%);
+  animation: pulse-red 2s ease-in-out infinite;
 }
 
 .status-circle::before {
@@ -1446,17 +1616,26 @@ pre, code {
   box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
 }
 
-.status-circle.help-circle::before {
-  background-color: #f97316;
-  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+.status-circle.smoke-circle::before {
+  /* Smoke: yellow */
+  background-color: #eab308;
+  box-shadow: 0 4px 12px rgba(234, 179, 8, 0.3);
 }
 
 .status-circle.sprinkler-circle::before {
+  /* Sprinkler: blue */
   background-color: #3b82f6;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
+.status-circle.temp-circle::before {
+  /* High temperature: orange */
+  background-color: #f97316;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
+
 .status-circle.alert-circle::before {
+  /* Fire: red */
   background-color: #ef4444;
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
@@ -1488,6 +1667,11 @@ pre, code {
 }
 
 .status-label.help-label {
+  background-color: #fde68a;
+  color: #713f12;
+}
+
+.status-label.temp-label {
   background-color: #fdba74;
   color: #7c2d12;
 }
@@ -1667,9 +1851,23 @@ pre, code {
 
 .readings-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 16px;
   margin-top: 16px;
+}
+
+/* First row: Temperature + Humidity side by side */
+.reading-row-two {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+/* On very small screens, stack them to 1 column for readability */
+@media (max-width: 360px) {
+  .reading-row-two {
+    grid-template-columns: 1fr;
+  }
 }
 
 .reading-card {
@@ -1892,81 +2090,127 @@ pre, code {
   letter-spacing: 0.5px;
 }
 
-.history-list {
+/* Logs Container */
+.logs-container {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-.history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  background-color: white;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+.log-entry {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 2px solid transparent;
+  transition: all 0.2s;
 }
 
-.history-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.log-entry:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
 }
 
-.history-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
+.log-entry.log-alert {
+  border-color: #fecaca;
+  background: linear-gradient(135deg, #ffffff 0%, #fef2f2 100%);
+}
+
+.log-entry.log-sprinkler {
+  border-color: #bfdbfe;
+  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+}
+
+.log-entry.log-smoke {
+  border-color: #fde68a;
+  background: linear-gradient(135deg, #ffffff 0%, #fef3c7 100%);
+}
+
+.log-entry.log-temp {
+  border-color: #fed7aa;
+  background: linear-gradient(135deg, #ffffff 0%, #ffedd5 100%);
+}
+
+.log-entry.log-safe {
+  border-color: #bbf7d0;
+  background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+}
+
+/* Simple Log Content */
+.log-simple-content {
+  width: 100%;
+}
+
+.log-event {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 16px;
+}
+
+.event-icon {
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
+  color: inherit;
 }
 
-.history-icon.safe {
-  background-color: #22c55e;
-}
-
-.history-icon.alert {
-  background-color: #eab308;
-}
-
-.icon {
-  width: 14px;
-  height: 14px;
-  color: white;
-}
-
-.history-info {
+.event-details {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
-.history-status {
+.event-title {
   font-size: 16px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.history-time {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.history-temperature {
-  font-size: 20px;
   font-weight: 700;
   color: #111827;
 }
 
-.history-extra {
+.event-time {
   font-size: 13px;
   color: #6b7280;
-  margin-top: 6px;
-  padding-left: 36px;
+  font-weight: 500;
+}
+
+/* Color classes for data values */
+.text-danger {
+  color: #dc2626 !important;
+}
+
+.text-success {
+  color: #16a34a !important;
+}
+
+.text-warning {
+  color: #ea580c !important;
+}
+
+.text-info {
+  color: #0284c7 !important;
+}
+
+/* Load More Button */
+.load-more-btn {
+  width: 100%;
+  padding: 12px 20px;
+  background: white;
+  border: 2px solid #dc2626;
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.load-more-btn:hover {
+  background: #dc2626;
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
 
 .no-data {
@@ -2296,4 +2540,37 @@ pre, code {
   color: #991b1b;
 }
 
+/* Respond Actions */
+.respond-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.respond-btn {
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.respond-btn:hover {
+  background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(220, 38, 38, 0.4);
+}
+
+.respond-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
+}
 </style>

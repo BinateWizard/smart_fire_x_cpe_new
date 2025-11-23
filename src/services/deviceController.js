@@ -14,8 +14,9 @@ function determineStatus(data) {
   // Smoke status: rely on digital flags (smokeDetected / mq2_do.smokeDetected)
   const smokeDetectedFlag =
     data.smokeDetected === true ||
-    (data.mq2_do && data.mq2_do.smokeDetected === true);
-  if (smokeDetectedFlag) return 'Alert';
+    (data.mq2_do && data.mq2_do.smokeDetected === true) ||
+    (data.mq2 && toStr(data.mq2.status) === 'smoke detected');
+  if (smokeDetectedFlag) return 'Smoke Detected';
   return 'Safe';
 }
 
@@ -34,11 +35,117 @@ export function useDeviceController(deviceIdRef) {
   const lastUpdated = ref(null);
   let mainUnsub = null;
   let statusUnsub = null;
+  let readingsUnsub = null;
+  const allReadings = [];
+  
+  // Load persisted history from localStorage
+  function loadPersistedHistory(deviceId) {
+    try {
+      const key = `firetap_history_${deviceId}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Convert ISO strings back to Date objects
+        return parsed.map(entry => ({
+          ...entry,
+          dateTime: new Date(entry.dateTime)
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to load persisted history:', err);
+    }
+    return [];
+  }
+  
+  // Save history to localStorage
+  function saveHistoryToStorage(deviceId, historyData) {
+    try {
+      const key = `firetap_history_${deviceId}`;
+      // Keep only last 500 entries to avoid storage limits
+      const toSave = historyData.slice(0, 500);
+      localStorage.setItem(key, JSON.stringify(toSave));
+    } catch (err) {
+      console.error('Failed to save history:', err);
+    }
+  }
 
   function start() {
     const deviceId = deviceIdRef.value;
     loading.value = true;
     noData.value = false;
+    
+    // Load persisted history and populate allReadings
+    const persisted = loadPersistedHistory(deviceId);
+    if (persisted.length > 0) {
+      allReadings.push(...persisted);
+      history.value = persisted;
+    }
+
+    // Listen to readings path for all historical data
+    const readingsRef = dbRef(rtdb, `devices/${deviceId}/readings`);
+    readingsUnsub = onValue(readingsRef, readingsSnapshot => {
+      if (readingsSnapshot.exists()) {
+        const readingsData = readingsSnapshot.val();
+        const readingsArr = Object.entries(readingsData).map(([key, value]) => {
+          const dht = value.dht || {};
+          const mq2Do = value.mq2_do || {};
+          const mq2Node = value.mq2 || {};
+          const temp = value.temperature !== undefined ? value.temperature : dht.temperature;
+          const humidity = value.humidity !== undefined ? value.humidity : dht.humidity;
+          const smokeAnalog = value.smokeLevel || value.smoke || value.smokeAnalog || value.mq2 || 0;
+          const smokeDetected =
+            value.smokeDetected === true ||
+            mq2Do.smokeDetected === true ||
+            (String(mq2Node.status || '').toLowerCase() === 'smoke detected');
+          
+          const buttonStatus = value.status || {};
+          const buttonState = buttonStatus.state || 'idle';
+          let buttonEventState = 'STATE_IDLE';
+          if (buttonState === 'alert') buttonEventState = 'STATE_ALERT';
+          else if (buttonState === 'sprinkler') buttonEventState = 'STATE_SPRINKLER';
+          
+          return {
+            id: key,
+            dateTime: value.lastSeen
+              ? new Date(value.lastSeen)
+              : (value.timestamp
+                ? new Date(value.timestamp)
+                : (mq2Node.timestamp
+                  ? new Date(mq2Node.timestamp)
+                  : new Date())),
+            smokeAnalog,
+            smokeDetected,
+            gasStatus: value.gasStatus || 'normal',
+            temperature: temp,
+            humidity: humidity,
+            message: value.message || (value.sensorError === true ? 'Sensor Error' : ''),
+            sensorError: value.sensorError === true,
+            sprinklerActive: value.sprinklerActive === true || buttonEventState === 'STATE_SPRINKLER',
+            buttonEvent: buttonEventState,
+            buttonState,
+            lastType: value.lastType,
+            status: determineStatusFromButton(value, buttonEventState)
+          };
+        });
+        
+        // Update history with readings data
+        const merged = [...readingsArr, ...allReadings];
+        const uniqueMap = new Map();
+        merged.forEach(entry => {
+          const timeKey = entry.dateTime.getTime();
+          if (!uniqueMap.has(timeKey)) {
+            uniqueMap.set(timeKey, entry);
+          }
+        });
+        
+        history.value = Array.from(uniqueMap.values())
+          .sort((a, b) => b.dateTime - a.dateTime)
+          .slice(0, 500);
+        
+        // Persist to localStorage
+        saveHistoryToStorage(deviceId, history.value);
+      }
+    });
 
     const deviceDataRef = dbRef(rtdb, `devices/${deviceId}`);
     mainUnsub = onValue(deviceDataRef, snapshot => {
@@ -58,6 +165,7 @@ export function useDeviceController(deviceIdRef) {
 
         const dhtNode = data.dht || {};
         const mq2DoNode = data.mq2_do || {};
+        const mq2Node = data.mq2 || {};
         let currentTemp = data.temperature;
         let currentHumidity = data.humidity;
         if (currentTemp === undefined && dhtNode.temperature !== undefined) currentTemp = dhtNode.temperature;
@@ -72,7 +180,8 @@ export function useDeviceController(deviceIdRef) {
           0;
         const smokeDetected =
           data.smokeDetected === true ||
-          mq2DoNode.smokeDetected === true;
+          mq2DoNode.smokeDetected === true ||
+          (String(mq2Node.status || '').toLowerCase() === 'smoke detected');
 
         const currentData = {
           id: Date.now(),
@@ -84,7 +193,9 @@ export function useDeviceController(deviceIdRef) {
                 ? new Date(dhtNode.timestamp)
                 : (mq2DoNode.timestamp
                   ? new Date(mq2DoNode.timestamp)
-                  : (data.timestamp ? new Date(data.timestamp) : new Date())))),
+                  : (mq2Node.timestamp
+                    ? new Date(mq2Node.timestamp)
+                    : (data.timestamp ? new Date(data.timestamp) : new Date()))))),
           smokeAnalog: rawSmokeAnalog,
           gasStatus: data.gasStatus || 'normal',
           temperature: currentTemp,
@@ -104,22 +215,80 @@ export function useDeviceController(deviceIdRef) {
         noData.value = false;
         lastUpdated.value = new Date();
 
-        // Build history for charts
+        // Add current reading to allReadings if it's new (check by timestamp)
+        const existingIndex = allReadings.findIndex(r => 
+          Math.abs(r.dateTime - currentData.dateTime) < 1000 // within 1 second
+        );
+        
+        if (existingIndex === -1) {
+          allReadings.unshift(currentData); // Add to beginning
+          if (allReadings.length > 500) allReadings.pop(); // Keep last 500
+        }
+
+        // Build history from stored readings path AND current updates
         if (data.readings && typeof data.readings === 'object') {
-          const arr = Object.entries(data.readings).map(([key, value]) => ({
-            id: key,
-            dateTime: value.lastSeen ? new Date(value.lastSeen) : (value.timestamp ? new Date(value.timestamp) : new Date()),
-            smokeAnalog: value.smokeLevel || value.smoke || value.smokeAnalog || value.mq2 || 0,
-            gasStatus: value.gasStatus || 'normal',
-            temperature: value.temperature,
-            humidity: value.humidity,
-            message: value.message || (value.sensorError === true ? 'Sensor Error' : ''),
-            sensorError: value.sensorError === true,
-            status: determineStatus(value)
-          })).sort((a,b) => b.dateTime - a.dateTime).slice(0,200);
-          history.value = arr;
+          const readingsArr = Object.entries(data.readings).map(([key, value]) => {
+            const dht = value.dht || {};
+            const mq2Do = value.mq2_do || {};
+            const mq2Node = value.mq2 || {};
+            const temp = value.temperature !== undefined ? value.temperature : dht.temperature;
+            const humidity = value.humidity !== undefined ? value.humidity : dht.humidity;
+            const smokeAnalog = value.smokeLevel || value.smoke || value.smokeAnalog || value.mq2 || 0;
+            const smokeDetected =
+              value.smokeDetected === true ||
+              mq2Do.smokeDetected === true ||
+              (String(mq2Node.status || '').toLowerCase() === 'smoke detected');
+            
+            const buttonStatus = value.status || {};
+            const buttonState = buttonStatus.state || 'idle';
+            let buttonEventState = 'STATE_IDLE';
+            if (buttonState === 'alert') buttonEventState = 'STATE_ALERT';
+            else if (buttonState === 'sprinkler') buttonEventState = 'STATE_SPRINKLER';
+            
+            return {
+              id: key,
+              dateTime: value.lastSeen
+                ? new Date(value.lastSeen)
+                : (value.timestamp
+                  ? new Date(value.timestamp)
+                  : (mq2Node.timestamp
+                    ? new Date(mq2Node.timestamp)
+                    : new Date())),
+              smokeAnalog,
+              smokeDetected,
+              gasStatus: value.gasStatus || 'normal',
+              temperature: temp,
+              humidity: humidity,
+              message: value.message || (value.sensorError === true ? 'Sensor Error' : ''),
+              sensorError: value.sensorError === true,
+              sprinklerActive: value.sprinklerActive === true || buttonEventState === 'STATE_SPRINKLER',
+              buttonEvent: buttonEventState,
+              buttonState,
+              lastType: value.lastType,
+              status: determineStatusFromButton(value, buttonEventState)
+            };
+          });
+          
+          // Merge readings from RTDB with live updates
+          const allEntries = [...readingsArr, ...allReadings];
+          const uniqueMap = new Map();
+          allEntries.forEach(entry => {
+            const timeKey = entry.dateTime.getTime();
+            if (!uniqueMap.has(timeKey)) {
+              uniqueMap.set(timeKey, entry);
+            }
+          });
+          
+          history.value = Array.from(uniqueMap.values())
+            .sort((a, b) => b.dateTime - a.dateTime)
+            .slice(0, 500);
+          
+          // Persist to localStorage
+          saveHistoryToStorage(deviceId, history.value);
         } else {
-          history.value = currentData ? [currentData] : [];
+          // No readings in RTDB, use live updates only
+          history.value = [...allReadings];
+          saveHistoryToStorage(deviceId, history.value);
         }
       } else {
         loading.value = false;
@@ -164,6 +333,7 @@ export function useDeviceController(deviceIdRef) {
   function stop() {
     if (mainUnsub) { mainUnsub(); mainUnsub = null; }
     if (statusUnsub) { statusUnsub(); statusUnsub = null; }
+    if (readingsUnsub) { readingsUnsub(); readingsUnsub = null; }
     stopAllAlerts(); // ensure cleanup if leaving page
   }
 
