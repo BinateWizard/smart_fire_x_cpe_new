@@ -23,6 +23,18 @@
         "meta": {
           ".read": "auth != null",
           ".write": "auth != null"
+        },
+        "command": {
+          ".read": "true",
+          ".write": "true"
+        },
+        "dht": {
+          ".read": "auth != null",
+          ".write": "true"
+        },
+        "mq2": {
+          ".read": "auth != null",
+          ".write": "true"
         }
       }
     }

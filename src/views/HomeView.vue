@@ -287,9 +287,6 @@
           <Plus class="icon" />
           Add New Device
         </button>
-        <button @click="$router.push('/debug')" class="debug-btn" title="Test Device Connection">
-          🔧
-        </button>
       </div>
 
       <!-- Device List -->
