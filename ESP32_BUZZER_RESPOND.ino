@@ -214,10 +214,21 @@ void triggerSprinkler() {
 }
 
 void resetSystem() {
+    Serial.println("🔄 RESET SYSTEM called");
+    Serial.print("  Previous state: ");
+    Serial.println(stateToString(systemState));
+    Serial.print("  Buzzer auto-off active: ");
+    Serial.println(buzzerAutoOffActive ? "YES" : "NO");
+    
     systemState = STATE_IDLE;
     setBuzzer(false);
     setSprinklerRelay(false);
     buzzerAutoOffActive = false; // Reset auto-off flag
+    
+    Serial.println("  ✅ System reset to IDLE");
+    Serial.println("  ✅ Buzzer OFF");
+    Serial.println("  ✅ Auto-off deactivated");
+    
     sendButtonEvent("reset", "quick press <=1s");
 }
 
@@ -498,8 +509,25 @@ void loop() {
             pressInProgress = false;
             unsigned long duration = now - pressStartMs;
 
+            Serial.print("[BUTTON] Button released after ");
+            Serial.print(duration);
+            Serial.print("ms, system state: ");
+            Serial.print(stateToString(systemState));
+            Serial.print(", duration <= ");
+            Serial.print(RESET_MAX_DURATION);
+            Serial.print(": ");
+            Serial.println(duration <= RESET_MAX_DURATION ? "YES" : "NO");
+
             if (duration <= RESET_MAX_DURATION && systemState != STATE_IDLE) {
+                Serial.println("  ✅ Conditions met - calling resetSystem()");
                 resetSystem();
+            } else {
+                if (systemState == STATE_IDLE) {
+                    Serial.println("  ⚠️ Already in IDLE state - no reset needed");
+                }
+                if (duration > RESET_MAX_DURATION) {
+                    Serial.println("  ⚠️ Press too long for reset (>1000ms)");
+                }
             }
         }
     }
