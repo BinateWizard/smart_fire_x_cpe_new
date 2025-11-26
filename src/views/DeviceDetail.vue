@@ -181,7 +181,7 @@
         <span v-else>High smoke levels detected recently.</span>
         Press button for ≤1s to reset or activate sprinkler (6s hold).
         <div class="respond-actions">
-          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
+          <button class="respond-btn" @click="goToMap">Show on Map</button>
         </div>
       </div>
 
@@ -190,7 +190,7 @@
         🌡️ <strong>High Temperature Warning!</strong><br>
         Temperature is elevated at {{ latest.temperature }}°C. Monitor the area closely.
         <div class="respond-actions">
-          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
+          <button class="respond-btn" @click="goToMap">Show on Map</button>
         </div>
       </div>
 
@@ -204,7 +204,7 @@
         <span v-else>Fire condition detected. Check device immediately.</span>
         Press button for ≤1s to reset or activate sprinkler (6s hold).
         <div class="respond-actions">
-          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
+          <button class="respond-btn" @click="goToMap">Show on Map</button>
         </div>
       </div>
 
@@ -213,7 +213,7 @@
         💦 <strong>Sprinkler System Active!</strong><br>
         Sprinkler activated via button (6s hold). Press button for ≤1s to reset.
         <div class="respond-actions">
-          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
+          <button class="respond-btn" @click="goToMap">Show on Map</button>
         </div>
       </div>
 
@@ -248,8 +248,6 @@
       </div>
       </div>
 
-      <showMap v-if="showMapModal" @close="closeMap" />
-
       <!-- Current Readings Section -->
       <div class="current-readings-section" v-if="latest">
         <h2 class="section-title">📊 CURRENT READINGS</h2>
@@ -282,7 +280,7 @@
 
       <!-- Quick Actions -->
       <div class="quick-actions" v-if="latest">
-        <button class="action-btn" @click="showMapModal = true">
+        <button class="action-btn" @click="goToMap">
           <MapPin :size="20" />
           View on Map
         </button>
@@ -626,7 +624,6 @@ const { latest, history, statusCards, loading: ctrlLoading, noData: ctrlNoData, 
 // Reuse names expected in template
 const loading = ctrlLoading;
 const noData = ctrlNoData;
-const showMapModal = ref(false);
 const showOfflineModal = ref(false);
 const showInactivityModal = ref(false);
 const showAllLogs = ref(false);
@@ -899,7 +896,6 @@ async function deleteDevice() {
 }
 
 onMounted(() => {
-  fetchDeviceInfo();
   startController();
 });
 
@@ -1109,6 +1105,10 @@ const displayLogs = computed(() => {
 
 function loadMoreLogs() {
   showAllLogs.value = !showAllLogs.value;
+}
+
+function goToMap() {
+  router.push('/map');
 }
 </script>
 
@@ -2178,7 +2178,7 @@ pre, code {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+       transform: translateY(0);
   }
 }
 
