@@ -323,7 +323,7 @@ void checkForCommands() {
         pattern = response.substring(patternStart, patternEnd);
     }
 
-    // Extract timestamp (convert from milliseconds to seconds to avoid overflow)
+    // Extract timestamp - use last 8 digits for uniqueness
     unsigned long timestamp = 0;
     if (timestampIdx != -1) {
         int timestampStart = response.indexOf(":", timestampIdx) + 1;
@@ -332,10 +332,10 @@ void checkForCommands() {
         String timestampStr = response.substring(timestampStart, timestampEnd);
         timestampStr.trim();
         
-        // JS timestamp is in milliseconds (13 digits), convert to seconds (10 digits)
-        // Take last 10 characters to avoid overflow on unsigned long (max ~4 billion)
-        if (timestampStr.length() > 10) {
-            timestampStr = timestampStr.substring(0, 10); // Convert ms to seconds
+        // JS timestamp is 13 digits in milliseconds
+        // Take last 8 digits (modulo approach for better uniqueness)
+        if (timestampStr.length() > 8) {
+            timestampStr = timestampStr.substring(timestampStr.length() - 8);
         }
         timestamp = timestampStr.toInt();
     }
@@ -344,11 +344,22 @@ void checkForCommands() {
     Serial.println("  Type: " + type);
     Serial.println("  Action: " + action);
     Serial.println("  Pattern: " + pattern);
-    Serial.println("  Timestamp (seconds): " + String(timestamp));
-    Serial.println("  Last processed timestamp: " + String(lastCommandTimestamp));
+    Serial.println("  Timestamp: " + String(timestamp));
+    Serial.println("  Last timestamp: " + String(lastCommandTimestamp));
 
-    // Process command only if it's new (prevent duplicate execution)
-    if (timestamp > lastCommandTimestamp) {
+    // Check if this is a different command (not a duplicate)
+    bool isDifferent = (timestamp != lastCommandTimestamp);
+    Serial.print("  Is different command: ");
+    Serial.println(isDifferent ? "YES" : "NO");
+
+    // Delete command immediately to prevent re-processing
+    Serial.println("  🗑️ Deleting command from Firebase...");
+    bool deleted = deleteFromRTDB(commandPath);
+    Serial.print("  Delete result: ");
+    Serial.println(deleted ? "SUCCESS" : "FAILED");
+
+    // Process command if it's different from last one
+    if (isDifferent) {
         Serial.println("✅ New command - executing...");
         lastCommandTimestamp = timestamp;
 
@@ -360,21 +371,31 @@ void checkForCommands() {
 
             // If system is in ALERT state, turn buzzer back ON
             if (systemState == STATE_ALERT) {
-                Serial.println("  🔔 Turning buzzer back ON...");
-                Serial.print("  Pin state BEFORE: ");
-                Serial.println(digitalRead(BUZZER_PIN));
+                Serial.println("\n  🔔 ===== TURNING BUZZER BACK ON =====");
+                Serial.print("  Current pin state: ");
+                Serial.println(digitalRead(BUZZER_PIN) == LOW ? "ON (LOW)" : "OFF (HIGH)");
                 
+                // Turn buzzer ON
                 digitalWrite(BUZZER_PIN, LOW); // Turn ON (active LOW)
-                delay(50); // Give it time to stabilize
+                delay(100); // Give relay time to switch
                 
-                Serial.print("  Pin state AFTER: ");
-                Serial.println(digitalRead(BUZZER_PIN));
-                Serial.println("  ✅ Buzzer relay command sent (should be ON now)");
+                Serial.print("  New pin state: ");
+                Serial.println(digitalRead(BUZZER_PIN) == LOW ? "ON (LOW)" : "OFF (HIGH)");
+                
+                // Verify the pin is actually LOW
+                if (digitalRead(BUZZER_PIN) == LOW) {
+                    Serial.println("  ✅ BUZZER IS NOW ON!");
+                } else {
+                    Serial.println("  ❌ WARNING: Buzzer pin is not LOW!");
+                }
                 
                 // Restart the 5-second timer
                 buzzerAutoOffActive = true;
                 buzzerOnStartMs = millis();
-                Serial.println("  ⏰ Buzzer will auto-OFF after 5 seconds");
+                Serial.print("  ⏰ Auto-OFF timer started at: ");
+                Serial.println(millis());
+                Serial.println("  ⏰ Will auto-OFF after 5 seconds");
+                Serial.println("  ========================================\n");
             } else {
                 Serial.println("  ⚠️ Not in ALERT state, cannot turn on buzzer");
                 // Not in alert state, just do the beep pattern
@@ -388,12 +409,10 @@ void checkForCommands() {
             }
 
             Serial.println("✅ Respond command completed");
-
-            // Clear command after execution to prevent re-triggering
-            deleteFromRTDB(commandPath);
         }
     } else {
-        Serial.println("⏭️ Command already processed (duplicate)");
+        Serial.println("⏭️ Command already processed (same timestamp - duplicate)");
+        Serial.println("  💡 This might happen if you clicked Respond twice very quickly");
     }
 }
 
@@ -552,10 +571,18 @@ void loop() {
         buzzerAutoOffActive = false;
         
         if (systemState == STATE_ALERT) {
-            Serial.println("⏰ 5 seconds passed - turning buzzer OFF automatically");
+            Serial.println("\n⏰ ===== 5 SECONDS PASSED - AUTO OFF =====");
+            Serial.print("  Buzzer state BEFORE: ");
+            Serial.println(digitalRead(BUZZER_PIN) == LOW ? "ON" : "OFF");
+            
             digitalWrite(BUZZER_PIN, HIGH); // Turn OFF
-            Serial.println("  ✅ Buzzer relay is now OFF");
-            Serial.println("  💡 Click 'Respond' button in app to turn it back ON");
+            delay(10);
+            
+            Serial.print("  Buzzer state AFTER: ");
+            Serial.println(digitalRead(BUZZER_PIN) == LOW ? "ON" : "OFF");
+            Serial.println("  ✅ Buzzer auto-OFF complete");
+            Serial.println("  💡 Click 'Respond' in app to turn it back ON");
+            Serial.println("========================================\n");
         }
     }
 

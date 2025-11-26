@@ -469,8 +469,8 @@
               'log-alert': entry.status === 'Alert' || entry.buttonEvent === 'STATE_ALERT',
               'log-sprinkler': entry.sprinklerActive || entry.buttonEvent === 'STATE_SPRINKLER',
               'log-smoke': entry.smokeDetected && entry.status !== 'Alert' && !entry.sprinklerActive,
-              'log-temp': entry.temperature >= 50 && entry.status !== 'Alert' && !entry.smokeDetected && !entry.sprinklerActive,
-              'log-safe': entry.status === 'Safe' && !entry.sprinklerActive && !entry.smokeDetected && entry.temperature < 50
+              'log-temp': (typeof entry.temperature === 'number' && entry.temperature >= 50) && !entry.smokeDetected && !entry.sprinklerActive,
+              'log-safe': entry.status === 'Safe' && !entry.sprinklerActive && !entry.smokeDetected && (typeof entry.temperature !== 'number' || entry.temperature < 50)
             }"
           >
             <!-- Simple Log Card - Only shows the main event -->
@@ -503,7 +503,7 @@
               </div>
 
               <!-- High Temperature Event -->
-              <div v-else-if="entry.temperature >= 50" class="log-event">
+              <div v-else-if="typeof entry.temperature === 'number' && entry.temperature >= 50" class="log-event">
                 <Flame class="event-icon" />
                 <div class="event-details">
                   <div class="event-title">🌡️ High Temperature ({{ entry.temperature }}°C)</div>
@@ -1257,6 +1257,11 @@ const smokePercentage = computed(() => {
 });
 
 const displayLogs = computed(() => {
+  console.log('📊 Display Logs - history.value length:', history.value.length);
+  if (history.value.length > 0) {
+    console.log('📊 First history entry:', history.value[0]);
+  }
+  
   // Sort by most recent first
   const sorted = [...history.value].sort((a, b) => b.dateTime - a.dateTime);
   

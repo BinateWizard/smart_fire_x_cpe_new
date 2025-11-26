@@ -40,6 +40,14 @@ import { collection, query, where, getDocs } from 'firebase/firestore'
 import { ref as dbRef, onValue } from 'firebase/database'
 import { db, rtdb, auth } from '@/firebase'
 
+// Fix Leaflet default marker icon issue with bundlers
+delete L.Icon.Default.prototype._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
+  iconUrl: require('leaflet/dist/images/marker-icon.png'),
+  shadowUrl: require('leaflet/dist/images/marker-shadow.png')
+})
+
 const emit = defineEmits(['close'])
 const router = useRouter()
 const route = useRoute()
@@ -92,6 +100,8 @@ function determineStatus(data) {
   return 'Safe'
 }
 
+const rtdbListeners = ref([])
+
 async function loadDeviceMarkers() {
   const currentUser = auth.currentUser
   if (!currentUser) return
@@ -110,25 +120,22 @@ async function loadDeviceMarkers() {
       const deviceData = doc.data()
       const deviceId = deviceData.deviceId
 
-      console.log('🔍 Checking device:', deviceId, deviceData)
-
       // PRIORITY 1: Check if device has coordinates stored in Firestore (from location picker)
       if (deviceData.coordinates && deviceData.coordinates.lat && deviceData.coordinates.lng) {
         const lat = parseFloat(deviceData.coordinates.lat)
         const lng = parseFloat(deviceData.coordinates.lng)
         
-        console.log(`📍 Device ${deviceId} location from Firestore:`, lat, lng)
-        
         if (!isNaN(lat) && !isNaN(lng)) {
           // Listen to real-time status from RTDB
           const rtdbRef = dbRef(rtdb, `devices/${deviceId}`)
-          onValue(rtdbRef, (rtdbSnapshot) => {
+          const unsubscribe = onValue(rtdbRef, (rtdbSnapshot) => {
             const liveData = rtdbSnapshot.val()
             const status = liveData ? determineStatus(liveData) : 'Safe'
             
+            // Update marker
             addDeviceMarker(deviceId, lat, lng, deviceData.name || deviceId, status)
             
-            // Update devices array for the panel
+            // Update devices array for the panel (without excessive logging)
             const existingIndex = devices.value.findIndex(d => d.deviceId === deviceId)
             const deviceInfo = {
               deviceId: deviceId,
@@ -138,33 +145,26 @@ async function loadDeviceMarkers() {
               status: status
             }
             
-            console.log('📝 Device info object:', JSON.stringify(deviceInfo))
-            
             if (existingIndex !== -1) {
               devices.value[existingIndex] = deviceInfo
             } else {
               devices.value.push(deviceInfo)
             }
-            
-            console.log('✅ Added device marker from Firestore:', deviceId)
-            console.log('📋 Current devices array:', JSON.stringify(devices.value))
-            
-            // Clean up any JSON that might leak into DOM
-            setTimeout(() => scrubDebugJSON(), 100)
           })
+          
+          // Store unsubscribe function for cleanup
+          rtdbListeners.value.push(unsubscribe)
         }
       } 
       // FALLBACK: Check RTDB for Lat/Lon (old ESP32-based location - deprecated)
       else {
         const rtdbRef = dbRef(rtdb, `devices/${deviceId}`)
-        onValue(rtdbRef, (rtdbSnapshot) => {
+        const unsubscribe = onValue(rtdbRef, (rtdbSnapshot) => {
           const liveData = rtdbSnapshot.val()
           
           if (liveData && liveData.Lat && liveData.Lon) {
             const lat = parseFloat(liveData.Lat)
             const lng = parseFloat(liveData.Lon)
-            
-            console.log(`📍 Device ${deviceId} location from RTDB (legacy):`, lat, lng)
             
             if (!isNaN(lat) && !isNaN(lng)) {
               const status = determineStatus(liveData)
@@ -185,18 +185,12 @@ async function loadDeviceMarkers() {
               } else {
                 devices.value.push(deviceInfo)
               }
-              
-              console.log('✅ Added device marker from RTDB (legacy):', deviceId)
-              
-              // Clean up any JSON that might leak into DOM
-              setTimeout(() => scrubDebugJSON(), 100)
-            } else {
-              console.warn('⚠️ Invalid coordinates from RTDB for', deviceId)
             }
-          } else {
-            console.warn('⚠️ No location data for device:', deviceId, '(Not set in Firestore or RTDB)')
           }
         })
+        
+        // Store unsubscribe function for cleanup
+        rtdbListeners.value.push(unsubscribe)
       }
     })
   } catch (error) {
@@ -314,6 +308,15 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // Clean up RTDB listeners first
+  rtdbListeners.value.forEach(unsubscribe => {
+    if (typeof unsubscribe === 'function') {
+      unsubscribe()
+    }
+  })
+  rtdbListeners.value = []
+  
+  // Clean up map
   if (map) {
     map.remove()
     map = null
@@ -327,29 +330,7 @@ onUnmounted(() => {
   devices.value = []
 })
 
-// Defensive: remove any accidental JSON blobs rendered by extensions/old cache
-function scrubDebugJSON() {
-  try {
-    const root = document.querySelector('.device-panel')
-    if (!root) return
-    const suspiciousKeys = ['"gasStatus"', '"lastSeen"', '"lastType"', '"sensorError"', '"deviceId"']
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null)
-    const toHide = new Set()
-    let n
-    while ((n = walker.nextNode())) {
-      const t = n.textContent?.trim()
-      if (!t || t.length < 10) continue
-      if (t.startsWith('{') && t.endsWith('}') && suspiciousKeys.some(k => t.includes(k))) {
-        if (n.parentElement) toHide.add(n.parentElement)
-      }
-    }
-    toHide.forEach(el => {
-      el.style.display = 'none'
-    })
-  } catch (_) {
-    /* no-op */
-  }
-}
+
 </script>
 
 <style scoped>

@@ -38,6 +38,15 @@ export function useDeviceController(deviceIdRef) {
   let readingsUnsub = null;
   const allReadings = [];
   
+  // Track previous state to detect changes
+  let previousState = {
+    status: null,
+    temperature: null,
+    smokeDetected: null,
+    buttonEvent: null,
+    sprinklerActive: null
+  };
+  
   // Load persisted history from localStorage
   function loadPersistedHistory(deviceId) {
     try {
@@ -163,39 +172,32 @@ export function useDeviceController(deviceIdRef) {
         if (buttonEventState === 'STATE_ALERT') buttonMessage = 'alert triggered';
         else if (buttonEventState === 'STATE_SPRINKLER') buttonMessage = 'sprinkler activated';
 
+        // Read from dht and mq2 nodes (DEVICE_010 structure)
         const dhtNode = data.dht || {};
-        const mq2DoNode = data.mq2_do || {};
         const mq2Node = data.mq2 || {};
-        let currentTemp = data.temperature;
-        let currentHumidity = data.humidity;
-        if (currentTemp === undefined && dhtNode.temperature !== undefined) currentTemp = dhtNode.temperature;
-        if (currentHumidity === undefined && dhtNode.humidity !== undefined) currentHumidity = dhtNode.humidity;
+        
+        // Temperature and humidity from dht node
+        let currentTemp = dhtNode.temperature !== undefined ? dhtNode.temperature : data.temperature;
+        let currentHumidity = dhtNode.humidity !== undefined ? dhtNode.humidity : data.humidity;
 
-        // Normalize smoke reading and detection flags for different schemas (legacy vs DEVICE_010)
-        const rawSmokeAnalog =
-          data.smokeLevel ||
-          data.smoke ||
-          data.smokeAnalog ||
-          data.mq2 ||
-          0;
-        const smokeDetected =
-          data.smokeDetected === true ||
-          mq2DoNode.smokeDetected === true ||
-          (String(mq2Node.status || '').toLowerCase() === 'smoke detected');
+        // Smoke detection from mq2 node status field
+        const mq2Status = String(mq2Node.status || '').toLowerCase();
+        const smokeDetected = 
+          mq2Status === 'smoke detected' || 
+          data.smokeDetected === true;
+        
+        // Smoke analog value (if available, otherwise 0)
+        const rawSmokeAnalog = data.smokeLevel || data.smoke || data.smokeAnalog || 0;
 
+        // Use most recent timestamp from dht or mq2 nodes
+        let latestTimestamp = new Date();
+        if (dhtNode.timestamp) latestTimestamp = new Date(dhtNode.timestamp);
+        else if (mq2Node.timestamp) latestTimestamp = new Date(mq2Node.timestamp);
+        else if (data.timestamp) latestTimestamp = new Date(data.timestamp);
+        
         const currentData = {
           id: Date.now(),
-          dateTime: buttonStatus.lastEventAt
-            ? new Date(buttonStatus.lastEventAt)
-            : (data.lastSeen
-              ? new Date(data.lastSeen)
-              : (dhtNode.timestamp
-                ? new Date(dhtNode.timestamp)
-                : (mq2DoNode.timestamp
-                  ? new Date(mq2DoNode.timestamp)
-                  : (mq2Node.timestamp
-                    ? new Date(mq2Node.timestamp)
-                    : (data.timestamp ? new Date(data.timestamp) : new Date()))))),
+          dateTime: latestTimestamp,
           smokeAnalog: rawSmokeAnalog,
           gasStatus: data.gasStatus || 'normal',
           temperature: currentTemp,
@@ -209,20 +211,60 @@ export function useDeviceController(deviceIdRef) {
           smokeDetected,
           status: determineStatusFromButton(data, buttonEventState)
         };
+        
+        console.log('🔥 Current data parsed:', {
+          temperature: currentTemp,
+          humidity: currentHumidity,
+          smokeDetected,
+          mq2Status: mq2Node.status,
+          timestamp: latestTimestamp
+        });
 
         latest.value = currentData;
         loading.value = false;
         noData.value = false;
         lastUpdated.value = new Date();
 
-        // Add current reading to allReadings if it's new (check by timestamp)
-        const existingIndex = allReadings.findIndex(r => 
-          Math.abs(r.dateTime - currentData.dateTime) < 1000 // within 1 second
-        );
+        // Detect state changes and create new log entry
+        const hasStateChanged = 
+          previousState.status !== currentData.status ||
+          previousState.buttonEvent !== currentData.buttonEvent ||
+          previousState.sprinklerActive !== currentData.sprinklerActive ||
+          previousState.smokeDetected !== currentData.smokeDetected ||
+          (previousState.temperature < 50 && currentData.temperature >= 50) || // Entered high temp
+          (previousState.temperature >= 50 && currentData.temperature < 50);   // Exited high temp
         
-        if (existingIndex === -1) {
-          allReadings.unshift(currentData); // Add to beginning
-          if (allReadings.length > 500) allReadings.pop(); // Keep last 500
+        console.log('🔄 State change check:', {
+          hasChanged: hasStateChanged,
+          previous: previousState,
+          current: {
+            status: currentData.status,
+            buttonEvent: currentData.buttonEvent,
+            temperature: currentData.temperature,
+            smokeDetected: currentData.smokeDetected
+          }
+        });
+
+        // Only add to history if state changed OR it's the first reading
+        if (hasStateChanged || previousState.status === null) {
+          const existingIndex = allReadings.findIndex(r => 
+            Math.abs(r.dateTime - currentData.dateTime) < 1000 // within 1 second
+          );
+          
+          if (existingIndex === -1) {
+            allReadings.unshift(currentData); // Add to beginning
+            if (allReadings.length > 500) allReadings.pop(); // Keep last 500
+            console.log('✅ New log entry created:', currentData.status, currentData.temperature);
+          }
+          
+          // Update previous state
+          previousState = {
+            status: currentData.status,
+            temperature: currentData.temperature,
+            smokeDetected: currentData.smokeDetected,
+            buttonEvent: currentData.buttonEvent,
+            sprinklerActive: currentData.sprinklerActive
+          };
         }
 
         // Build history from stored readings path AND current updates
