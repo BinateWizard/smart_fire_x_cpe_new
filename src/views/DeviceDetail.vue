@@ -212,6 +212,9 @@
       <div v-if="hasSprinklerActive" class="sprinkler-banner">
         💦 <strong>Sprinkler System Active!</strong><br>
         Sprinkler activated via button (6s hold). Press button for ≤1s to reset.
+        <div class="respond-actions">
+          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+        </div>
       </div>
 
       <!-- Sensor Error Warning -->
@@ -895,47 +898,46 @@ async function deleteDevice() {
   }
 }
 
+function getPHISOString(date = new Date()) {
+  const tzOffset = 8 * 60; // +08:00 in minutes
+  const tz = '+08:00';
+  const local = new Date(date.getTime() + (tzOffset + date.getTimezoneOffset()) * 60000);
+  return local.toISOString().replace('Z', tz);
+}
+
 async function handleRespond() {
   console.log('🔵 handleRespond function called!');
   console.log('🔵 deviceId:', deviceId.value);
-  
   try {
     // Stop all alert effects (sound + vibration)
     stopAllAlerts();
     console.log('🔵 Alerts stopped');
-    
-    // Send buzzer beep command to ESP32 via RTDB
-    const commandPath = `devices/${deviceId.value}/command`;
-    console.log('📤 Sending command to Firebase RTDB path:', commandPath);
-    console.log('📤 Device ID:', deviceId.value);
-    
-    const buzzerCommandRef = dbRef(rtdb, commandPath);
-    const commandData = {
-      type: 'buzzer',
-      action: 'beep',
-      pattern: 'triple',
-      timestamp: Date.now()
+
+    // Get current user
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      alert('You must be logged in to respond.');
+      return;
+    }
+
+    // Prepare respond payload
+    const respondPath = `devices/${deviceId.value}/control/respond`;
+    const respondRef = dbRef(rtdb, respondPath);
+    const now = new Date();
+    const isoString = getPHISOString(now);
+    const respondData = {
+      requestedBy: currentUser.uid,
+      requestedAt: isoString,
+      processed: false
     };
-    
-    console.log('📤 Command data:', commandData);
-    
-    await set(buzzerCommandRef, commandData);
-    
-    console.log('✅ Buzzer command sent to ESP32 successfully');
-    console.log('✅ Full RTDB path:', commandPath);
-    alert('Command sent! Check ESP32 Serial Monitor.');
-  } catch (error) {
-    console.error('❌ Error sending buzzer command:', error);
-    console.error('❌ Error details:', error.message);
-    alert('Failed to send command: ' + error.message);
-  }
-  
-  // Show the whole map view
-  try {
+    console.log('📤 Writing respond data to:', respondPath, respondData);
+    await set(respondRef, respondData);
+    alert('Respond command sent!');
+    // Navigate to map after responding
     router.push('/map');
-  } catch (_) {
-    // Fallback to inline modal if route is unavailable
-    showMapModal.value = true;
+  } catch (error) {
+    console.error('❌ Error sending respond command:', error);
+    alert('Failed to send respond command: ' + error.message);
   }
 }
 
@@ -1067,7 +1069,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (tempChartInstance) tempChartInstance.destroy();
-  if (humidityChartInstance) tempChartInstance = null;
+  if (humidityChartInstance) humidityChartInstance = null;
   if (smokeChartInstance) smokeChartInstance.destroy();
   if (humidityChartInstance) humidityChartInstance = null;
   stopController();

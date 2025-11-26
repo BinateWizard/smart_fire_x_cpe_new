@@ -48,6 +48,9 @@ let map = null
 const userMarker = ref(null)
 const deviceMarkers = ref([])
 const devices = ref([])
+const initialUserLocation = ref({ lat: null, lng: null });
+const usedFallback = ref(false);
+const mapReady = ref(false);
 
 function close() {
   // Notify parent (modal) that it should close
@@ -260,42 +263,53 @@ function initMap(lat, lng) {
   loadDeviceMarkers()
 }
 
-onMounted(async () => {
-  // Wait for DOM to be fully ready
-  await nextTick()
-  
-  // Verify map container exists
-  const mapContainer = document.getElementById('map')
-  if (!mapContainer) {
-    console.error('❌ Map container #map not found in DOM')
-    return
+function recenterToUserLocation() {
+  if (initialUserLocation.value.lat !== null && initialUserLocation.value.lng !== null && map) {
+    map.setView([initialUserLocation.value.lat, initialUserLocation.value.lng], 14, { animate: true });
+    if (userMarker.value) {
+      userMarker.value.setLatLng([initialUserLocation.value.lat, initialUserLocation.value.lng]);
+      userMarker.value.openPopup();
+    }
   }
-  
-  // Try to get user's current location
+}
+
+onMounted(async () => {
+  await nextTick();
+  const mapContainer = document.getElementById('map');
+  if (!mapContainer) {
+    console.error('❌ Map container #map not found in DOM');
+    return;
+  }
   if ('geolocation' in navigator) {
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        // Success - use user's location
-        const lat = position.coords.latitude
-        const lng = position.coords.longitude
-        console.log('📍 User location:', lat, lng)
-        initMap(lat, lng)
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        initialUserLocation.value = { lat, lng };
+        usedFallback.value = false;
+        console.log('📍 User location:', lat, lng);
+        mapReady.value = true;
+        nextTick(() => initMap(lat, lng));
       },
       (error) => {
-        // Error or denied - fallback to NCR
-        console.warn('⚠️ Geolocation error, using NCR fallback:', error.message)
-        initMap(14.5995, 120.9842)
+        usedFallback.value = true;
+        console.warn('⚠️ Geolocation error, using NCR fallback:', error.message);
+        initialUserLocation.value = { lat: 14.5995, lng: 120.9842 };
+        mapReady.value = true;
+        nextTick(() => initMap(14.5995, 120.9842));
       },
       {
         enableHighAccuracy: true,
         timeout: 5000,
         maximumAge: 0
       }
-    )
+    );
   } else {
-    // Geolocation not supported - fallback to NCR
-    console.warn('⚠️ Geolocation not supported, using NCR fallback')
-    initMap(14.5995, 120.9842)
+    usedFallback.value = true;
+    console.warn('⚠️ Geolocation not supported, using NCR fallback');
+    initialUserLocation.value = { lat: 14.5995, lng: 120.9842 };
+    mapReady.value = true;
+    nextTick(() => initMap(14.5995, 120.9842));
   }
 })
 
