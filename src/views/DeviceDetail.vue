@@ -181,7 +181,7 @@
         <span v-else>High smoke levels detected recently.</span>
         Press button for ≤1s to reset or activate sprinkler (6s hold).
         <div class="respond-actions">
-          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
         </div>
       </div>
 
@@ -190,7 +190,7 @@
         🌡️ <strong>High Temperature Warning!</strong><br>
         Temperature is elevated at {{ latest.temperature }}°C. Monitor the area closely.
         <div class="respond-actions">
-          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
         </div>
       </div>
 
@@ -204,7 +204,7 @@
         <span v-else>Fire condition detected. Check device immediately.</span>
         Press button for ≤1s to reset or activate sprinkler (6s hold).
         <div class="respond-actions">
-          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
         </div>
       </div>
 
@@ -213,7 +213,7 @@
         💦 <strong>Sprinkler System Active!</strong><br>
         Sprinkler activated via button (6s hold). Press button for ≤1s to reset.
         <div class="respond-actions">
-          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+          <button class="respond-btn" @click="showMapModal = true">Show on Map</button>
         </div>
       </div>
 
@@ -897,170 +897,6 @@ async function deleteDevice() {
     alert(`Failed to delete device: ${error.message}`);
   }
 }
-
-function getPHISOString(date = new Date()) {
-  const tzOffset = 8 * 60; // +08:00 in minutes
-  const tz = '+08:00';
-  const local = new Date(date.getTime() + (tzOffset + date.getTimezoneOffset()) * 60000);
-  return local.toISOString().replace('Z', tz);
-}
-
-async function handleRespond() {
-  console.log('🔵 handleRespond function called!');
-  console.log('🔵 deviceId:', deviceId.value);
-  try {
-    // Stop all alert effects (sound + vibration)
-    stopAllAlerts();
-    console.log('🔵 Alerts stopped');
-
-    // Get current user
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      alert('You must be logged in to respond.');
-      return;
-    }
-
-    // Prepare respond payload
-    const respondPath = `devices/${deviceId.value}/control/respond`;
-    const respondRef = dbRef(rtdb, respondPath);
-    const now = new Date();
-    const isoString = getPHISOString(now);
-    const respondData = {
-      requestedBy: currentUser.uid,
-      requestedAt: isoString,
-      processed: false
-    };
-    console.log('📤 Writing respond data to:', respondPath, respondData);
-    await set(respondRef, respondData);
-    alert('Respond command sent!');
-    // Navigate to map after responding
-    router.push('/map');
-  } catch (error) {
-    console.error('❌ Error sending respond command:', error);
-    alert('Failed to send respond command: ' + error.message);
-  }
-}
-
-// Defensive: remove any accidental JSON blobs rendered by extensions/old cache
-function scrubDebugJSON() {
-  try {
-    const root = document.querySelector('.app-container');
-    if (!root) return;
-    const suspiciousKeys = [ '"gasStatus"', '"lastSeen"', '"lastType"', '"sensorError"' ];
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    const toHide = new Set();
-    let n;
-    while ((n = walker.nextNode())) {
-      const t = n.textContent?.trim();
-      if (!t || t.length < 10) continue;
-      if (t.startsWith('{') && t.endsWith('}') && suspiciousKeys.every(k => t.includes(k))) {
-        if (n.parentElement) toHide.add(n.parentElement);
-      }
-    }
-    toHide.forEach(el => {
-      el.style.display = 'none';
-    });
-  } catch (_) {
-    /* no-op */
-  }
-}
-
-// Calculate smoke percentage from analog value (0–4095 → 0–100%)
-function getSmokePercentage(analogValue) {
-  const max = 4095;
-  const min = 0;
-  let percent = ((analogValue - min) / (max - min)) * 100;
-  return Math.min(100, Math.max(0, Math.round(percent)));
-}
-
-function getSmokeLevel(analogValue) {
-  return getSmokePercentage(analogValue);
-}
-
-function getSmokeColor(percentage) {
-  if (percentage > 80) return '#dc2626';
-  if (percentage > 60) return '#eab308';
-  return '#22c55e';
-}
-
-function getSmokeBadgeClass(percentage) {
-  if (percentage > 80) return 'smoke-high';
-  if (percentage > 60) return 'smoke-med';
-  return 'smoke-low';
-}
-
-function determineStatusFromButton(data, buttonEvent) {
-  // Button event takes priority over sensor data
-  if (buttonEvent === 'STATE_ALERT') return 'Alert';
-  if (buttonEvent === 'STATE_SPRINKLER') return 'Safe'; // Sprinkler is active but not "alert"
-  
-  // Fall back to regular status determination
-  return determineStatus(data);
-}
-
-function determineStatus(data) {
-  if (!data || typeof data !== 'object') return 'Safe';
-
-  const toStr = (v) => String(v || '').toLowerCase();
-
-  // Hard alert conditions - only if explicitly set
-  if (data.sensorError === true) return 'Alert';
-  if (data.message === 'help requested' || data.message === 'alarm has been triggered') return 'Alert';
-  if (data.lastType === 'alarm') return 'Alert';
-  
-  // Only trigger alert for gas if it's explicitly detected/critical (not just missing data)
-  if (data.gasStatus && ['critical','detected'].includes(toStr(data.gasStatus))) return 'Alert';
-
-  // If status is a string, normalize only if it's a known label
-  if (typeof data.status === 'string') {
-    const s = toStr(data.status).trim();
-    if (s === 'alert' || s === 'unsafe') return 'Alert';
-    if (s === 'safe' || s === 'normal') return 'Safe';
-    // If it's JSON-like, try to parse and re-evaluate
-    if (s.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(data.status);
-        return determineStatus(parsed);
-      } catch (_) { /* ignore */ }
-    }
-  }
-
-  // Smoke threshold check - only if value exists and is high
-  const smokeValue = data.smokeLevel ?? data.smoke ?? data.smokeAnalog ?? 0;
-  if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert';
-
-  return 'Safe';
-}
-
-async function fetchDeviceInfo() {
-  try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) return;
-
-    // Use composite ID: userId_deviceId
-    const docId = `${currentUser.uid}_${deviceId.value}`;
-    const deviceRef = doc(db, "devices", docId);
-    const docSnap = await getDoc(deviceRef);
-    
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      deviceInfo.value = data;
-      deviceName.value = data.name || data.deviceId || deviceId.value;
-      if (data.location && typeof data.location === 'string') {
-        deviceLocation.value = data.location;
-      } else if (data.coordinates && data.coordinates.lat) {
-        deviceLocation.value = `${data.coordinates.lat.toFixed(6)}, ${data.coordinates.lng.toFixed(6)}`;
-      }
-    } else {
-      deviceName.value = deviceId.value;
-    }
-  } catch (error) {
-    console.error("❌ Error fetching device info:", error);
-    deviceName.value = deviceId.value;
-  }
-}
-
-// Removed inline fetchData logic in favor of controller
 
 onMounted(() => {
   fetchDeviceInfo();
